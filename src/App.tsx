@@ -12,6 +12,7 @@ import {
   CloudOff,
   Download,
   FileSpreadsheet,
+  Flame,
   Lock,
   LockOpen,
   LogIn,
@@ -23,6 +24,7 @@ import {
 } from 'lucide-react';
 import { CloudSyncCard } from './components/CloudSyncCard';
 import { EmergencyPoster } from './components/EmergencyPoster';
+import { EpiSiteModal } from './components/EpiSiteModal';
 import { PersonModal } from './components/PersonModal';
 import { PersonnelManager } from './components/PersonnelManager';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -82,6 +84,7 @@ export default function App() {
   const [fitScale, setFitScale] = useState(0.75);
 
   const [personModalOpen, setPersonModalOpen] = useState(false);
+  const [epiSiteModalOpen, setEpiSiteModalOpen] = useState(false);
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [quickZoneName, setQuickZoneName] = useState('');
   const [sidebarToast, setSidebarToast] = useState<string | null>(null);
@@ -1127,7 +1130,10 @@ export default function App() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('zones')}
+                  onClick={() => {
+                    if (!requireEditAccess()) return;
+                    setEpiSiteModalOpen(true);
+                  }}
                   className="text-[11px] font-semibold text-red-700 hover:underline cursor-pointer"
                 >
                   Choisir des E.P.I « Site » pour cette zone →
@@ -1322,6 +1328,19 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!requireEditAccess()) return;
+                      setEpiSiteModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-[#B91C1C] bg-red-50 border border-red-200 rounded-lg hover:bg-red-100/70 transition-colors cursor-pointer"
+                    title="Choisir des E.P.I du site à afficher sous Proche de la zone"
+                  >
+                    <Flame className="w-3.5 h-3.5" />
+                    <span>E.P.I « SITE » ({posterColumns.epiSite.length})</span>
+                  </button>
+
                   {isCloudReady && user?.isAnonymous && (
                     canEditCloud ? (
                       <button
@@ -1440,6 +1459,10 @@ export default function App() {
                       onRequestLogoUpload={() => {
                         if (!requireEditAccess()) return;
                         quickLogoInputRef.current?.click();
+                      }}
+                      onManageEpiSite={() => {
+                        if (!requireEditAccess()) return;
+                        setEpiSiteModalOpen(true);
                       }}
                     />
                   </div>
@@ -1582,6 +1605,17 @@ export default function App() {
           setEditingPerson(null);
         }}
         onSave={handleSavePerson}
+      />
+
+      {/* Modale de sélection rapide des E.P.I « SITE » pour la zone active */}
+      <EpiSiteModal
+        isOpen={epiSiteModalOpen}
+        zone={activeZone}
+        people={data.people}
+        zonesById={zonesById}
+        onTogglePerson={handleToggleEpiSitePerson}
+        onClearAll={handleClearZoneEpiSite}
+        onClose={() => setEpiSiteModalOpen(false)}
       />
 
       {/* Modale de déverrouillage Équipe SharePoint (Code PIN) */}

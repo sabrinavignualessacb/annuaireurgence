@@ -399,7 +399,7 @@ export const ZoneManager: React.FC<ZoneManagerProps> = ({
                   Créez au moins une deuxième zone pour configurer la proximité géographique.
                 </p>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-2 max-h-[240px] overflow-y-auto pr-0.5">
                   {zones
                     .filter((z) => z.id !== configZone.id)
                     .map((other) => {

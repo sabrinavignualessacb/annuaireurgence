@@ -1,5 +1,5 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
-import { ImagePlus, PhoneCall } from 'lucide-react';
+import { ImagePlus, PhoneCall, Plus } from 'lucide-react';
 import { CONFIDENTIALITY_NOTICE, Person, PosterSettings, Zone } from '../types';
 import { getNearbyDisplayZoneName, PosterColumnsData } from '../utils/posterLogic';
 import {
@@ -15,6 +15,7 @@ interface EmergencyPosterProps {
   zonesById: Map<string, Zone>;
   settings: PosterSettings;
   onRequestLogoUpload?: () => void;
+  onManageEpiSite?: () => void;
 }
 
 type PriorityTier = 'primary' | 'nearby' | 'site';
@@ -161,6 +162,7 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
   zonesById,
   settings,
   onRequestLogoUpload,
+  onManageEpiSite,
 }) => {
   const activeZoneName = activeZone ? activeZone.name : 'ZONE NON DÉFINIE';
   const headerHeight = settings.headerHeightPx ?? 68;
@@ -453,16 +455,39 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
                   <EmptySectionNotice label="Aucun E.P.I à proximité" />
                 )}
               </div>
+              {columns.epiSite.length === 0 && onManageEpiSite && (
+                <div className="no-print mt-3 pt-2 border-t border-dashed border-[#D91E18]/25 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={onManageEpiSite}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-dashed border-[#D91E18]/45 bg-red-50/50 hover:bg-red-50 text-[#B91C1C] text-[11px] font-semibold transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Ajouter des E.P.I « SITE »</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Bloc 3 : SITE (personnes choisies) — Plus grande transparence */}
             {columns.epiSite.length > 0 && (
               <div className="px-3 py-1.5 flex-1 min-h-0 flex flex-col overflow-hidden">
-                <div
-                  style={{ fontSize: `${zoneBannerFontSize}px` }}
-                  className="text-slate-400 font-display font-extrabold uppercase tracking-wider text-center leading-tight py-0.5 mb-1 shrink-0"
-                >
-                  SITE
+                <div className="relative flex items-center justify-center py-0.5 mb-1 shrink-0">
+                  <div
+                    style={{ fontSize: `${zoneBannerFontSize}px` }}
+                    className="text-slate-400 font-display font-extrabold uppercase tracking-wider text-center leading-tight"
+                  >
+                    SITE
+                  </div>
+                  {onManageEpiSite && (
+                    <button
+                      type="button"
+                      onClick={onManageEpiSite}
+                      className="no-print absolute right-0 top-1/2 -translate-y-1/2 px-2 py-0.5 text-[10px] font-semibold text-[#B91C1C] bg-red-50 hover:bg-red-100 border border-red-200 rounded transition-colors cursor-pointer"
+                    >
+                      Modifier
+                    </button>
+                  )}
                 </div>
                 <div
                   ref={epiSiteListContainerRef}
