@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { ImagePlus, PhoneCall } from 'lucide-react';
 import { CONFIDENTIALITY_NOTICE, Person, PosterSettings, Zone } from '../types';
 import { getNearbyDisplayZoneName, PosterColumnsData } from '../utils/posterLogic';
@@ -25,6 +25,8 @@ interface PersonRowProps {
   accentColor: 'green' | 'red' | 'orange' | 'yellow';
   tier?: PriorityTier;
   zoneScale?: number;
+  siteFontSize?: number;
+  sitePadY?: number;
 }
 
 const PersonRow: React.FC<PersonRowProps> = ({
@@ -33,6 +35,8 @@ const PersonRow: React.FC<PersonRowProps> = ({
   accentColor,
   tier = 'primary',
   zoneScale = 1.15,
+  siteFontSize = 10,
+  sitePadY = 2,
 }) => {
   const numColorMap = {
     green: 'text-[#006B39]',
@@ -55,6 +59,8 @@ const PersonRow: React.FC<PersonRowProps> = ({
       style={
         isPrimary
           ? { paddingTop: `${primaryPadY}px`, paddingBottom: `${primaryPadY}px` }
+          : isSite
+          ? { paddingTop: `${sitePadY}px`, paddingBottom: `${sitePadY}px` }
           : undefined
       }
       className={`flex items-baseline justify-between gap-2 border-b last:border-b-0 ${
@@ -62,38 +68,59 @@ const PersonRow: React.FC<PersonRowProps> = ({
           ? 'border-slate-300/80'
           : isNearby
           ? 'py-[3px] border-slate-200/70'
-          : 'py-[2px] border-slate-200/50'
+          : 'border-slate-200/50'
       }`}
     >
-      <div className="min-w-0 flex-1 flex items-baseline gap-1.5 flex-wrap">
+      <div
+        className={`min-w-0 flex-1 flex items-baseline gap-1.5 ${
+          isSite ? 'flex-nowrap overflow-hidden whitespace-nowrap' : 'flex-wrap'
+        }`}
+      >
         <span
-          style={isPrimary ? { fontSize: `${primaryLastPx}px` } : undefined}
+          style={
+            isPrimary
+              ? { fontSize: `${primaryLastPx}px` }
+              : isSite
+              ? { fontSize: `${siteFontSize}px`, lineHeight: 1.18 }
+              : undefined
+          }
           className={`font-display uppercase leading-tight tracking-tight ${
             isPrimary
               ? 'font-extrabold text-slate-950'
               : isNearby
               ? 'font-bold text-slate-800 text-[11px]'
-              : 'font-semibold text-slate-700 text-[10px]'
+              : 'font-semibold text-slate-700 shrink-0'
           }`}
         >
           {person.lastName}
         </span>
         <span
-          style={isPrimary ? { fontSize: `${primaryFirstPx}px` } : undefined}
+          style={
+            isPrimary
+              ? { fontSize: `${primaryFirstPx}px` }
+              : isSite
+              ? { fontSize: `${Math.max(5.5, siteFontSize - 0.5)}px`, lineHeight: 1.18 }
+              : undefined
+          }
           className={`leading-tight ${
             isPrimary
               ? 'font-semibold text-slate-900'
               : isNearby
               ? 'font-medium text-slate-700 text-[10.5px]'
-              : 'font-normal text-slate-600 text-[9.5px]'
+              : 'font-normal text-slate-600 shrink-0'
           }`}
         >
           {person.firstName}
         </span>
         {zoneLabel && (
           <span
-            className={`font-medium truncate ${
-              isSite ? 'text-[8.5px] text-slate-400' : 'text-[9px] text-slate-500'
+            style={
+              isSite
+                ? { fontSize: `${Math.max(5, siteFontSize - 1.5)}px`, lineHeight: 1.18 }
+                : undefined
+            }
+            className={`font-medium truncate min-w-0 ${
+              isSite ? 'text-slate-400' : 'text-[9px] text-slate-500'
             }`}
           >
             ({zoneLabel})
@@ -101,7 +128,13 @@ const PersonRow: React.FC<PersonRowProps> = ({
         )}
       </div>
       <span
-        style={isPrimary ? { fontSize: `${primaryNumPx}px` } : undefined}
+        style={
+          isPrimary
+            ? { fontSize: `${primaryNumPx}px` }
+            : isSite
+            ? { fontSize: `${siteFontSize}px`, lineHeight: 1.18 }
+            : undefined
+        }
         className={`font-mono-num leading-tight shrink-0 whitespace-nowrap ${
           numColorMap[accentColor]
         } ${
@@ -109,7 +142,7 @@ const PersonRow: React.FC<PersonRowProps> = ({
             ? 'font-extrabold'
             : isNearby
             ? 'font-bold text-[11px]'
-            : 'font-semibold text-[10px]'
+            : 'font-semibold'
         }`}
       >
         N° {person.internalNumber}
@@ -138,6 +171,61 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
   const companyLogoSizePx = settings.companyLogoSizePx ?? 54;
   const pictogramSizePx = settings.pictogramSizePx ?? 44;
   const roleBadgeSizePx = settings.roleBadgeSizePx ?? 24;
+
+  const siteListContainerRef = useRef<HTMLDivElement>(null);
+  const [siteDensity, setSiteDensity] = useState<{ fontSize: number; padY: number }>({
+    fontSize: 10,
+    padY: 2,
+  });
+
+  useLayoutEffect(() => {
+    const computeDensity = () => {
+      const container = siteListContainerRef.current;
+      const count = columns.sstSite.length;
+      if (!container || count === 0) {
+        setSiteDensity((prev) =>
+          prev.fontSize === 10 && prev.padY === 2 ? prev : { fontSize: 10, padY: 2 }
+        );
+        return;
+      }
+
+      const availableHeight = container.clientHeight;
+      if (availableHeight <= 0) return;
+
+      const borderPerRow = count > 1 ? (count - 1) / count : 0;
+      const targetPerRow = availableHeight / count;
+      const maxTextAndPad = targetPerRow - borderPerRow;
+
+      let nextFontSize = 10;
+      let nextPadY = 2;
+
+      if (maxTextAndPad < 15.8) {
+        nextPadY = maxTextAndPad >= 13 ? 1 : maxTextAndPad >= 10.5 ? 0.5 : 0;
+        const computedFont = Math.floor(((maxTextAndPad - nextPadY * 2) / 1.18) * 10) / 10;
+        nextFontSize = Math.max(5.5, Math.min(10, computedFont));
+      }
+
+      setSiteDensity((prev) =>
+        prev.fontSize === nextFontSize && prev.padY === nextPadY
+          ? prev
+          : { fontSize: nextFontSize, padY: nextPadY }
+      );
+    };
+
+    computeDensity();
+
+    const container = siteListContainerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(computeDensity);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [
+    columns.sstSite.length,
+    columns.sstZone.length,
+    columns.sstNearby.length,
+    zoneScale,
+    headerHeight,
+  ]);
 
   return (
     <div
@@ -238,31 +326,28 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
             </div>
 
             {/* Bloc 3 : SITE — Plus grande transparence */}
-            <div className="px-3 py-1.5 flex-1 min-h-0 overflow-hidden">
+            <div className="px-3 py-1.5 flex-1 min-h-0 flex flex-col overflow-hidden">
               <div
                 style={{ fontSize: `${zoneBannerFontSize}px` }}
-                className="text-slate-400 font-display font-extrabold uppercase tracking-wider text-center leading-tight py-0.5 mb-1"
+                className="text-slate-400 font-display font-extrabold uppercase tracking-wider text-center leading-tight py-0.5 mb-1 shrink-0"
               >
                 SITE
               </div>
-              <div className="opacity-45">
+              <div
+                ref={siteListContainerRef}
+                className="flex-1 min-h-0 overflow-hidden opacity-45"
+              >
                 {columns.sstSite.length > 0 ? (
-                  <div
-                    className={
-                      columns.sstSite.length > 6 ? 'grid grid-cols-2 gap-x-3' : 'flex flex-col'
-                    }
-                  >
+                  <div className="flex flex-col">
                     {columns.sstSite.map((p) => (
                       <PersonRow
                         key={p.id}
                         person={p}
-                        zoneLabel={
-                          columns.sstSite.length <= 6
-                            ? zonesById.get(p.primaryZoneId)?.name
-                            : undefined
-                        }
+                        zoneLabel={zonesById.get(p.primaryZoneId)?.name}
                         accentColor="green"
                         tier="site"
+                        siteFontSize={siteDensity.fontSize}
+                        sitePadY={siteDensity.padY}
                       />
                     ))}
                   </div>
