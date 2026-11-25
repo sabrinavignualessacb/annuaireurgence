@@ -4,6 +4,7 @@ export interface Zone {
   id: string;
   name: string;
   nearbyZoneIds: string[];
+  epiSitePersonIds?: string[]; // E.P.I choisis pour le bloc SITE de cette zone
 }
 
 export interface Person {

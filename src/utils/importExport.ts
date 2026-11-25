@@ -59,20 +59,21 @@ export function validateAndParseJsonImport(rawText: string): AppData {
     throw new Error('Structure JSON invalide : champs "zones" et "people" requis.');
   }
 
-  const zones: Zone[] = parsed.zones
+  const zonesRaw: Zone[] = parsed.zones
     .filter((z) => z && typeof z.name === 'string' && z.name.trim().length > 0)
     .map((z) => ({
       id: String(z.id || `zone-${crypto.randomUUID()}`),
       name: z.name.trim().toUpperCase(),
       nearbyZoneIds: Array.isArray(z.nearbyZoneIds) ? z.nearbyZoneIds.map(String) : [],
+      epiSitePersonIds: Array.isArray(z.epiSitePersonIds) ? z.epiSitePersonIds.map(String) : [],
     }));
 
-  if (zones.length === 0) {
+  if (zonesRaw.length === 0) {
     throw new Error('Le fichier JSON doit contenir au moins une zone valide.');
   }
 
-  const validZoneIds = new Set(zones.map((z) => z.id));
-  const fallbackZoneId = zones[0].id;
+  const validZoneIds = new Set(zonesRaw.map((z) => z.id));
+  const fallbackZoneId = zonesRaw[0].id;
 
   const people: Person[] = parsed.people
     .filter((p) => p && typeof p.lastName === 'string' && typeof p.firstName === 'string')
@@ -100,6 +101,12 @@ export function validateAndParseJsonImport(rawText: string): AppData {
       trainingExpiryDate: typeof p.trainingExpiryDate === 'string' ? p.trainingExpiryDate : '',
       isActive: typeof p.isActive === 'boolean' ? p.isActive : true,
     }));
+
+  const validPersonIds = new Set(people.map((p) => p.id));
+  const zones: Zone[] = zonesRaw.map((z) => ({
+    ...z,
+    epiSitePersonIds: (z.epiSitePersonIds || []).filter((pid) => validPersonIds.has(pid)),
+  }));
 
   return {
     zones,

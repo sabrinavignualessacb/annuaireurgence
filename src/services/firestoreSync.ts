@@ -122,6 +122,9 @@ function buildZonePayload(
   const base = {
     name: (zone.name || 'ZONE').trim().toUpperCase().slice(0, 120),
     nearbyZoneIds: (zone.nearbyZoneIds || []).slice(0, 50).map((id) => String(id).slice(0, 128)),
+    epiSitePersonIds: (zone.epiSitePersonIds || [])
+      .slice(0, 50)
+      .map((id) => String(id).slice(0, 128)),
     updatedAt: serverTimestamp(),
   };
   if (isCreate) {
@@ -158,7 +161,7 @@ function buildPersonPayload(
     firstName: (person.firstName || '—').trim().slice(0, 80),
     internalNumber: validNum,
     roles: rolesToSave,
-    primaryZoneId: String(person.primaryZoneId || '').slice(0, 128),
+    primaryZoneId: (String(person.primaryZoneId || '').trim() || 'zone-default').slice(0, 128),
     coveredZoneIds: (person.coveredZoneIds || []).slice(0, 50).map((id) => String(id).slice(0, 128)),
     nearbyZoneIds: (person.nearbyZoneIds || []).slice(0, 50).map((id) => String(id).slice(0, 128)),
     trainingExpiryDate: expiry,
@@ -349,24 +352,39 @@ export async function seedEntireSiteToFirestore(
 ): Promise<void> {
   const siteRef = doc(db, 'sites', siteId);
   try {
+    const existingSite = await getDoc(siteRef);
+    if (existingSite.exists()) {
+      await updateDoc(
+        siteRef,
+        buildSitePayload(
+          data.settings.companyName || 'Site Principal',
+          ownerUid,
+          sharedUids,
+          data,
+          false,
+          teamShared
+        )
+      );
+    } else {
+      await setDoc(
+        siteRef,
+        buildSitePayload(
+          data.settings.companyName || 'Site Principal',
+          ownerUid,
+          sharedUids,
+          data,
+          true,
+          teamShared
+        )
+      );
+    }
+
     const existingZones = await getDocs(collection(db, 'sites', siteId, 'zones'));
     const existingPeople = await getDocs(collection(db, 'sites', siteId, 'people'));
 
     const batch = writeBatch(db);
     existingZones.forEach((d) => batch.delete(d.ref));
     existingPeople.forEach((d) => batch.delete(d.ref));
-
-    batch.set(
-      siteRef,
-      buildSitePayload(
-        data.settings.companyName || 'Site Principal',
-        ownerUid,
-        sharedUids,
-        data,
-        true,
-        teamShared
-      )
-    );
 
     data.zones.forEach((zone) => {
       const zId = sanitizeId(zone.id);
@@ -463,6 +481,9 @@ export function subscribeToSiteData(
           id: docSnap.id,
           name: String(d.name || 'ZONE'),
           nearbyZoneIds: Array.isArray(d.nearbyZoneIds) ? d.nearbyZoneIds.map(String) : [],
+          epiSitePersonIds: Array.isArray(d.epiSitePersonIds)
+            ? d.epiSitePersonIds.map(String)
+            : [],
         };
       });
       zones.sort((a, b) => a.name.localeCompare(b.name, 'fr'));

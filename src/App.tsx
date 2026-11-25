@@ -416,11 +416,37 @@ export default function App() {
   };
 
   // Handlers Personnel
-  const handleSavePerson = (personData: Omit<Person, 'id'>, existingId?: string) => {
+  const handleSavePerson = (
+    personData: Omit<Person, 'id'>,
+    existingId?: string,
+    epiSiteZoneIds?: string[]
+  ) => {
     if (!requireEditAccess()) return;
     const newId = existingId || `p-${crypto.randomUUID()}`;
     const savedPerson: Person = { ...personData, id: newId };
-    const nextSettings = withAutoDate(dataRef.current);
+    const prevSnapshot = dataRef.current;
+    const nextSettings = withAutoDate(prevSnapshot);
+
+    const changedZones: Zone[] = [];
+    const targetZoneSet = epiSiteZoneIds !== undefined ? new Set(epiSiteZoneIds) : null;
+
+    const nextZones =
+      targetZoneSet !== null
+        ? prevSnapshot.zones.map((z) => {
+            const currentIds = z.epiSitePersonIds || [];
+            const currentlyIncluded = currentIds.includes(newId);
+            const shouldInclude = savedPerson.roles.includes('EPI') && targetZoneSet.has(z.id);
+            if (currentlyIncluded === shouldInclude) return z;
+            const updatedZone: Zone = {
+              ...z,
+              epiSitePersonIds: shouldInclude
+                ? Array.from(new Set([...currentIds, newId]))
+                : currentIds.filter((id) => id !== newId),
+            };
+            changedZones.push(updatedZone);
+            return updatedZone;
+          })
+        : prevSnapshot.zones;
 
     setData((prev) => {
       const nextPeople = existingId
@@ -428,6 +454,7 @@ export default function App() {
         : [...prev.people, savedPerson];
       return {
         ...prev,
+        zones: nextZones,
         people: nextPeople,
         settings: withAutoDate(prev),
       };
@@ -443,8 +470,19 @@ export default function App() {
         teamShared,
         handlePermissionDenied
       );
-      if (dataRef.current.settings.autoUpdateDate) {
-        syncSettingsToCloud(nextSettings, dataRef.current.activeZoneId);
+      changedZones.forEach((z) => {
+        void upsertZoneInFirestore(
+          siteId,
+          z,
+          siteOwnerUid,
+          sharedUids,
+          false,
+          teamShared,
+          handlePermissionDenied
+        );
+      });
+      if (prevSnapshot.settings.autoUpdateDate) {
+        syncSettingsToCloud(nextSettings, prevSnapshot.activeZoneId);
       }
     }
   };
@@ -480,17 +518,42 @@ export default function App() {
 
   const handleDeletePerson = (personId: string) => {
     if (!requireEditAccess()) return;
-    const nextSettings = withAutoDate(dataRef.current);
+    const prevSnapshot = dataRef.current;
+    const nextSettings = withAutoDate(prevSnapshot);
+    const changedZones: Zone[] = [];
+    const nextZones = prevSnapshot.zones.map((z) => {
+      const currentIds = z.epiSitePersonIds || [];
+      if (!currentIds.includes(personId)) return z;
+      const updated: Zone = {
+        ...z,
+        epiSitePersonIds: currentIds.filter((id) => id !== personId),
+      };
+      changedZones.push(updated);
+      return updated;
+    });
+
     setData((prev) => ({
       ...prev,
+      zones: nextZones,
       people: prev.people.filter((p) => p.id !== personId),
       settings: withAutoDate(prev),
     }));
 
-    if (isCloudReady && canEditCloud && siteId) {
+    if (isCloudReady && canEditCloud && siteId && siteOwnerUid) {
       void deletePersonInFirestore(siteId, personId, handlePermissionDenied);
-      if (dataRef.current.settings.autoUpdateDate) {
-        syncSettingsToCloud(nextSettings, dataRef.current.activeZoneId);
+      changedZones.forEach((z) => {
+        void upsertZoneInFirestore(
+          siteId,
+          z,
+          siteOwnerUid,
+          sharedUids,
+          false,
+          teamShared,
+          handlePermissionDenied
+        );
+      });
+      if (prevSnapshot.settings.autoUpdateDate) {
+        syncSettingsToCloud(nextSettings, prevSnapshot.activeZoneId);
       }
     }
   };
@@ -739,6 +802,75 @@ export default function App() {
     }
   };
 
+  const handleToggleEpiSitePerson = (zoneId: string, personId: string) => {
+    if (!requireEditAccess()) return;
+    const prevSnapshot = dataRef.current;
+    const targetZone = prevSnapshot.zones.find((z) => z.id === zoneId);
+    if (!targetZone) return;
+
+    const currentIds = targetZone.epiSitePersonIds || [];
+    const exists = currentIds.includes(personId);
+    const updatedZone: Zone = {
+      ...targetZone,
+      epiSitePersonIds: exists
+        ? currentIds.filter((id) => id !== personId)
+        : Array.from(new Set([...currentIds, personId])),
+    };
+    const nextSettings = withAutoDate(prevSnapshot);
+
+    setData((prev) => ({
+      ...prev,
+      zones: prev.zones.map((z) => (z.id === zoneId ? updatedZone : z)),
+      settings: withAutoDate(prev),
+    }));
+
+    if (isCloudReady && canEditCloud && siteId && siteOwnerUid) {
+      void upsertZoneInFirestore(
+        siteId,
+        updatedZone,
+        siteOwnerUid,
+        sharedUids,
+        false,
+        teamShared,
+        handlePermissionDenied
+      );
+      if (prevSnapshot.settings.autoUpdateDate) {
+        syncSettingsToCloud(nextSettings, prevSnapshot.activeZoneId);
+      }
+    }
+  };
+
+  const handleClearZoneEpiSite = (zoneId: string) => {
+    if (!requireEditAccess()) return;
+    const prevSnapshot = dataRef.current;
+    const targetZone = prevSnapshot.zones.find((z) => z.id === zoneId);
+    if (!targetZone || (targetZone.epiSitePersonIds || []).length === 0) return;
+
+    const updatedZone: Zone = { ...targetZone, epiSitePersonIds: [] };
+    const nextSettings = withAutoDate(prevSnapshot);
+
+    setData((prev) => ({
+      ...prev,
+      zones: prev.zones.map((z) => (z.id === zoneId ? updatedZone : z)),
+      settings: withAutoDate(prev),
+    }));
+
+    if (isCloudReady && canEditCloud && siteId && siteOwnerUid) {
+      void upsertZoneInFirestore(
+        siteId,
+        updatedZone,
+        siteOwnerUid,
+        sharedUids,
+        false,
+        teamShared,
+        handlePermissionDenied
+      );
+      if (prevSnapshot.settings.autoUpdateDate) {
+        syncSettingsToCloud(nextSettings, prevSnapshot.activeZoneId);
+      }
+    }
+  };
+
   // Handlers Settings & Import/Export
   const handleUpdateSettings = (partial: Partial<PosterSettings>) => {
     if (!requireEditAccess()) return;
@@ -980,9 +1112,10 @@ export default function App() {
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-slate-700">
-                    <span>E.P.I (Zone / Proche)</span>
+                    <span>E.P.I (Zone / Proche / Site)</span>
                     <span className="font-mono-num font-bold text-[#B91C1C]">
-                      {posterColumns.epiZone.length} / {posterColumns.epiNearby.length}
+                      {posterColumns.epiZone.length} / {posterColumns.epiNearby.length} /{' '}
+                      {posterColumns.epiSite.length}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-slate-700">
@@ -992,6 +1125,13 @@ export default function App() {
                     </span>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('zones')}
+                  className="text-[11px] font-semibold text-red-700 hover:underline cursor-pointer"
+                >
+                  Choisir des E.P.I « Site » pour cette zone →
+                </button>
 
                 {excludedPeopleCount > 0 && (
                   <button
@@ -1345,6 +1485,8 @@ export default function App() {
                 onRenameZone={handleRenameZone}
                 onDeleteZone={handleDeleteZone}
                 onToggleZoneProximity={handleToggleZoneProximity}
+                onToggleEpiSitePerson={handleToggleEpiSitePerson}
+                onClearZoneEpiSite={handleClearZoneEpiSite}
               />
             </div>
           )}

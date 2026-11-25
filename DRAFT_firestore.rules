@@ -50,6 +50,10 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/sites/$(siteId)).data;
     }
 
+    function siteDocAfter(siteId) {
+      return getAfter(/databases/$(database)/documents/sites/$(siteId)).data;
+    }
+
     function memberPath(siteId, uid) {
       return /databases/$(database)/documents/sites/$(siteId)/members/$(uid);
     }
@@ -70,6 +74,12 @@ service cloud.firestore {
       return isVerified()
         && exists(/databases/$(database)/documents/sites/$(siteId))
         && siteDoc(siteId).ownerUid == request.auth.uid;
+    }
+
+    function isSiteOwnerAfter(siteId) {
+      return isVerified()
+        && existsAfter(/databases/$(database)/documents/sites/$(siteId))
+        && siteDocAfter(siteId).ownerUid == request.auth.uid;
     }
 
     function isSiteMember(siteId) {
@@ -94,6 +104,12 @@ service cloud.firestore {
     function isSiteEditor(siteId) {
       return isBootstrappedAdmin()
         || isSiteOwner(siteId)
+        || isMemberEditorValid(siteId);
+    }
+
+    function isSiteEditorAfter(siteId) {
+      return isBootstrappedAdmin()
+        || isSiteOwnerAfter(siteId)
         || isMemberEditorValid(siteId);
     }
 
@@ -186,6 +202,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'name',
           'nearbyZoneIds',
+          'epiSitePersonIds',
           'ownerUid',
           'sharedUids',
           'teamShared',
@@ -194,6 +211,7 @@ service cloud.firestore {
         ])
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
         && isValidZoneIdList(data.nearbyZoneIds)
+        && (!('epiSitePersonIds' in data) || isValidZoneIdList(data.epiSitePersonIds))
         && data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128
         && isValidSharedUids(data.sharedUids)
         && (!('teamShared' in data) || data.teamShared is bool)
@@ -344,10 +362,10 @@ service cloud.firestore {
           && isValidId(siteId)
           && isValidId(zoneId)
           && isValidZone(incoming())
-          && exists(/databases/$(database)/documents/sites/$(siteId))
-          && isSiteEditor(siteId)
-          && incoming().ownerUid == siteDoc(siteId).ownerUid
-          && (!('teamShared' in incoming()) || ('teamShared' in siteDoc(siteId) && incoming().teamShared == siteDoc(siteId).teamShared))
+          && existsAfter(/databases/$(database)/documents/sites/$(siteId))
+          && isSiteEditorAfter(siteId)
+          && incoming().ownerUid == siteDocAfter(siteId).ownerUid
+          && (!('teamShared' in incoming()) || ('teamShared' in siteDocAfter(siteId) && incoming().teamShared == siteDocAfter(siteId).teamShared))
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time;
         allow update: if isSignedIn()
@@ -359,7 +377,7 @@ service cloud.firestore {
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
           && (
-            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'nearbyZoneIds', 'updatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'nearbyZoneIds', 'epiSitePersonIds', 'updatedAt'])
             || ((siteDoc(siteId).ownerUid == request.auth.uid || isBootstrappedAdmin())
                 && incoming().diff(existing()).affectedKeys().hasOnly(['sharedUids', 'teamShared', 'updatedAt']))
           );
@@ -382,10 +400,10 @@ service cloud.firestore {
           && isValidId(siteId)
           && isValidId(personId)
           && isValidPerson(incoming())
-          && exists(/databases/$(database)/documents/sites/$(siteId))
-          && isSiteEditor(siteId)
-          && incoming().ownerUid == siteDoc(siteId).ownerUid
-          && (!('teamShared' in incoming()) || ('teamShared' in siteDoc(siteId) && incoming().teamShared == siteDoc(siteId).teamShared))
+          && existsAfter(/databases/$(database)/documents/sites/$(siteId))
+          && isSiteEditorAfter(siteId)
+          && incoming().ownerUid == siteDocAfter(siteId).ownerUid
+          && (!('teamShared' in incoming()) || ('teamShared' in siteDocAfter(siteId) && incoming().teamShared == siteDocAfter(siteId).teamShared))
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time;
         allow update: if isSignedIn()

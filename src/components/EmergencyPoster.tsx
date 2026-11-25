@@ -173,17 +173,24 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
   const roleBadgeSizePx = settings.roleBadgeSizePx ?? 24;
 
   const siteListContainerRef = useRef<HTMLDivElement>(null);
+  const epiSiteListContainerRef = useRef<HTMLDivElement>(null);
   const [siteDensity, setSiteDensity] = useState<{ fontSize: number; padY: number }>({
+    fontSize: 10,
+    padY: 2,
+  });
+  const [epiSiteDensity, setEpiSiteDensity] = useState<{ fontSize: number; padY: number }>({
     fontSize: 10,
     padY: 2,
   });
 
   useLayoutEffect(() => {
-    const computeDensity = () => {
-      const container = siteListContainerRef.current;
-      const count = columns.sstSite.length;
+    const computeDensity = (
+      container: HTMLDivElement | null,
+      count: number,
+      setter: React.Dispatch<React.SetStateAction<{ fontSize: number; padY: number }>>
+    ) => {
       if (!container || count === 0) {
-        setSiteDensity((prev) =>
+        setter((prev) =>
           prev.fontSize === 10 && prev.padY === 2 ? prev : { fontSize: 10, padY: 2 }
         );
         return;
@@ -205,24 +212,32 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
         nextFontSize = Math.max(5.5, Math.min(10, computedFont));
       }
 
-      setSiteDensity((prev) =>
+      setter((prev) =>
         prev.fontSize === nextFontSize && prev.padY === nextPadY
           ? prev
           : { fontSize: nextFontSize, padY: nextPadY }
       );
     };
 
-    computeDensity();
+    const updateAll = () => {
+      computeDensity(siteListContainerRef.current, columns.sstSite.length, setSiteDensity);
+      computeDensity(epiSiteListContainerRef.current, columns.epiSite.length, setEpiSiteDensity);
+    };
 
-    const container = siteListContainerRef.current;
-    if (!container || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(computeDensity);
-    observer.observe(container);
+    updateAll();
+
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(updateAll);
+    if (siteListContainerRef.current) observer.observe(siteListContainerRef.current);
+    if (epiSiteListContainerRef.current) observer.observe(epiSiteListContainerRef.current);
     return () => observer.disconnect();
   }, [
     columns.sstSite.length,
     columns.sstZone.length,
     columns.sstNearby.length,
+    columns.epiSite.length,
+    columns.epiZone.length,
+    columns.epiNearby.length,
     zoneScale,
     headerHeight,
   ]);
@@ -379,7 +394,7 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
 
           <div className="flex-1 min-h-0 flex flex-col divide-y divide-[#D91E18]/25 overflow-hidden">
             {/* Bloc 1 : Zone active — MIS EN ÉVIDENCE PRIORITAIRE */}
-            <div className="px-3 pt-2 pb-2 bg-[#FEE2E2]/70 border-b-2 border-[#D91E18]/50">
+            <div className="px-3 pt-2 pb-2 bg-[#FEE2E2]/70 border-b-2 border-[#D91E18]/50 flex-shrink-0">
               <div
                 style={{
                   fontSize: `${zoneBannerFontSize}px`,
@@ -408,10 +423,16 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
             </div>
 
             {/* Bloc 2 : PROCHE DE LA ZONE — Transparence intermédiaire */}
-            <div className="px-3 py-2 flex-1 min-h-0 overflow-hidden">
+            <div
+              className={
+                columns.epiSite.length > 0
+                  ? 'px-3 py-1.5 flex-shrink-0'
+                  : 'px-3 py-2 flex-1 min-h-0 overflow-hidden'
+              }
+            >
               <div
                 style={{ fontSize: `${zoneBannerFontSize}px` }}
-                className="text-[#D91E18] font-display font-extrabold uppercase tracking-wider text-center leading-tight py-0.5 mb-1.5"
+                className="text-[#D91E18] font-display font-extrabold uppercase tracking-wider text-center leading-tight py-0.5 mb-1"
               >
                 PROCHE DE LA ZONE
               </div>
@@ -433,6 +454,36 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Bloc 3 : SITE (personnes choisies) — Plus grande transparence */}
+            {columns.epiSite.length > 0 && (
+              <div className="px-3 py-1.5 flex-1 min-h-0 flex flex-col overflow-hidden">
+                <div
+                  style={{ fontSize: `${zoneBannerFontSize}px` }}
+                  className="text-slate-400 font-display font-extrabold uppercase tracking-wider text-center leading-tight py-0.5 mb-1 shrink-0"
+                >
+                  SITE
+                </div>
+                <div
+                  ref={epiSiteListContainerRef}
+                  className="flex-1 min-h-0 overflow-hidden opacity-45"
+                >
+                  <div className="flex flex-col">
+                    {columns.epiSite.map((p) => (
+                      <PersonRow
+                        key={p.id}
+                        person={p}
+                        zoneLabel={zonesById.get(p.primaryZoneId)?.name}
+                        accentColor="red"
+                        tier="site"
+                        siteFontSize={epiSiteDensity.fontSize}
+                        sitePadY={epiSiteDensity.padY}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </section>
 

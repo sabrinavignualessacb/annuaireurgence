@@ -7,6 +7,7 @@ export interface PosterColumnsData {
   sstSite: Person[];
   epiZone: Person[];
   epiNearby: Person[];
+  epiSite: Person[];
   evacSerreFile: Person[];
   evacGuide: Person[];
   eligibleCount: number;
@@ -31,7 +32,7 @@ export function personCoversZone(person: Person, zoneId: string): boolean {
   return Array.isArray(person.coveredZoneIds) && person.coveredZoneIds.includes(zoneId);
 }
 
-function isNearbyToActiveZone(person: Person, activeZone: Zone): boolean {
+export function isNearbyToActiveZone(person: Person, activeZone: Zone): boolean {
   if (personCoversZone(person, activeZone.id)) return false;
   const coveredIds = getPersonCoveredZoneIds(person);
   const zoneConfiguredNearby = coveredIds.some((zid) =>
@@ -71,6 +72,7 @@ export function computePosterColumns(
       sstSite: [],
       epiZone: [],
       epiNearby: [],
+      epiSite: [],
       evacSerreFile: [],
       evacGuide: [],
       eligibleCount: 0,
@@ -96,6 +98,11 @@ export function computePosterColumns(
   const epiNearby = allEpi
     .filter((p) => !personCoversZone(p, activeZone.id) && isNearbyToActiveZone(p, activeZone))
     .sort(sortByLastName);
+  const epiZoneAndNearbyIds = new Set([...epiZone, ...epiNearby].map((p) => p.id));
+  const selectedEpiSiteIds = new Set(activeZone.epiSitePersonIds || []);
+  const epiSite = allEpi
+    .filter((p) => selectedEpiSiteIds.has(p.id) && !epiZoneAndNearbyIds.has(p.id))
+    .sort(sortByLastName);
 
   // Colonne 3 : ÉVACUATION SECOURS (zone active uniquement, incluant multi-zones)
   const zoneEvacEligible = eligible.filter((p) => personCoversZone(p, activeZone.id));
@@ -112,6 +119,7 @@ export function computePosterColumns(
     sstSite,
     epiZone,
     epiNearby,
+    epiSite,
     evacSerreFile,
     evacGuide,
     eligibleCount: eligible.length,

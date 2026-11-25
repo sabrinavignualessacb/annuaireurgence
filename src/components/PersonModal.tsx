@@ -14,7 +14,11 @@ interface PersonModalProps {
   zones: Zone[];
   defaultZoneId: string;
   onClose: () => void;
-  onSave: (personData: Omit<Person, 'id'>, existingId?: string) => void;
+  onSave: (
+    personData: Omit<Person, 'id'>,
+    existingId?: string,
+    epiSiteZoneIds?: string[]
+  ) => void;
 }
 
 const ALL_ROLES: EmergencyRole[] = ['SST', 'EPI', 'GUIDE', 'SERRE_FILE'];
@@ -34,6 +38,7 @@ export const PersonModal: React.FC<PersonModalProps> = ({
   const [primaryZoneId, setPrimaryZoneId] = useState(defaultZoneId);
   const [coveredZoneIds, setCoveredZoneIds] = useState<string[]>([]);
   const [nearbyZoneIds, setNearbyZoneIds] = useState<string[]>([]);
+  const [epiSiteZoneIds, setEpiSiteZoneIds] = useState<string[]>([]);
   const [trainingExpiryDate, setTrainingExpiryDate] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -48,6 +53,11 @@ export const PersonModal: React.FC<PersonModalProps> = ({
       setPrimaryZoneId(personToEdit.primaryZoneId);
       setCoveredZoneIds(personToEdit.coveredZoneIds || []);
       setNearbyZoneIds(personToEdit.nearbyZoneIds || []);
+      setEpiSiteZoneIds(
+        zones
+          .filter((z) => (z.epiSitePersonIds || []).includes(personToEdit.id))
+          .map((z) => z.id)
+      );
       setTrainingExpiryDate(personToEdit.trainingExpiryDate);
       setIsActive(personToEdit.isActive);
     } else {
@@ -58,6 +68,7 @@ export const PersonModal: React.FC<PersonModalProps> = ({
       setPrimaryZoneId(defaultZoneId || zones[0]?.id || '');
       setCoveredZoneIds([]);
       setNearbyZoneIds([]);
+      setEpiSiteZoneIds([]);
       const nextYear = new Date();
       nextYear.setFullYear(nextYear.getFullYear() + 1);
       setTrainingExpiryDate(nextYear.toISOString().slice(0, 10));
@@ -80,13 +91,25 @@ export const PersonModal: React.FC<PersonModalProps> = ({
       const next = exists ? prev.filter((id) => id !== zoneId) : [...prev, zoneId];
       if (!exists) {
         setNearbyZoneIds((nPrev) => nPrev.filter((id) => id !== zoneId));
+        setEpiSiteZoneIds((ePrev) => ePrev.filter((id) => id !== zoneId));
       }
       return next;
     });
   };
 
   const toggleNearbyZone = (zoneId: string) => {
-    setNearbyZoneIds((prev) =>
+    setNearbyZoneIds((prev) => {
+      const exists = prev.includes(zoneId);
+      const next = exists ? prev.filter((id) => id !== zoneId) : [...prev, zoneId];
+      if (!exists) {
+        setEpiSiteZoneIds((ePrev) => ePrev.filter((id) => id !== zoneId));
+      }
+      return next;
+    });
+  };
+
+  const toggleEpiSiteZone = (zoneId: string) => {
+    setEpiSiteZoneIds((prev) =>
       prev.includes(zoneId) ? prev.filter((id) => id !== zoneId) : [...prev, zoneId]
     );
   };
@@ -121,6 +144,21 @@ export const PersonModal: React.FC<PersonModalProps> = ({
     }
 
     const cleanCovered = coveredZoneIds.filter((id) => id !== primaryZoneId);
+    const cleanNearby = nearbyZoneIds.filter(
+      (id) => id !== primaryZoneId && !cleanCovered.includes(id)
+    );
+    const allCovered = [primaryZoneId, ...cleanCovered];
+    const cleanEpiSiteZones = roles.includes('EPI')
+      ? epiSiteZoneIds.filter((zid) => {
+          if (zid === primaryZoneId || cleanCovered.includes(zid) || cleanNearby.includes(zid)) {
+            return false;
+          }
+          const targetZone = zones.find((z) => z.id === zid);
+          if (!targetZone) return false;
+          return !allCovered.some((cid) => targetZone.nearbyZoneIds.includes(cid));
+        })
+      : [];
+
     onSave(
       {
         lastName: cleanLast,
@@ -129,13 +167,12 @@ export const PersonModal: React.FC<PersonModalProps> = ({
         roles,
         primaryZoneId,
         coveredZoneIds: cleanCovered,
-        nearbyZoneIds: nearbyZoneIds.filter(
-          (id) => id !== primaryZoneId && !cleanCovered.includes(id)
-        ),
+        nearbyZoneIds: cleanNearby,
         trainingExpiryDate,
         isActive,
       },
-      personToEdit?.id
+      personToEdit?.id,
+      cleanEpiSiteZones
     );
     onClose();
   };
@@ -407,6 +444,53 @@ export const PersonModal: React.FC<PersonModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* E.P.I SITE pour les zones ayant peu d'effectif */}
+          {roles.includes('EPI') &&
+            (() => {
+              const allCovered = [primaryZoneId, ...coveredZoneIds];
+              const epiSiteCandidateZones = zones.filter(
+                (z) =>
+                  z.id !== primaryZoneId &&
+                  !coveredZoneIds.includes(z.id) &&
+                  !nearbyZoneIds.includes(z.id) &&
+                  !allCovered.some((cid) => z.nearbyZoneIds.includes(cid))
+              );
+              if (epiSiteCandidateZones.length === 0) return null;
+              return (
+                <div className="pt-2 border-t border-slate-100">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Afficher aussi en E.P.I « SITE » pour les zones (optionnel)
+                  </label>
+                  <p className="text-[11px] text-slate-500 mb-2">
+                    Utile pour les zones ayant peu d&apos;E.P.I dans la zone ou à proximité.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {epiSiteCandidateZones.map((z) => {
+                      const checked = epiSiteZoneIds.includes(z.id);
+                      return (
+                        <label
+                          key={z.id}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs cursor-pointer transition-colors ${
+                            checked
+                              ? 'border-[#D91E18] bg-red-50 text-[#B91C1C] font-semibold'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleEpiSiteZone(z.id)}
+                            className="w-3.5 h-3.5 accent-[#D91E18] cursor-pointer"
+                          />
+                          <span>{z.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
           {/* Actions */}
           <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-3">
