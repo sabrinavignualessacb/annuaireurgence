@@ -1,0 +1,287 @@
+{
+  "entities": {
+    "SiteConfig": {
+      "title": "SiteConfig",
+      "description": "Configuration générale d'un site d'annuaire d'urgence (nom, logo, mise en page A3, zone active).",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Nom du site ou de l'établissement."
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID du propriétaire du site."
+        },
+        "sharedUids": {
+          "type": "array",
+          "description": "Liste bornée (max 10) des UID autorisés à accéder à ce site."
+        },
+        "companyName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Nom de l'entreprise affiché sur l'affiche."
+        },
+        "companyLogoDataUrl": {
+          "type": "string",
+          "maxLength": 400000,
+          "description": "Logo de l'entreprise encodé en Data URL (compressé <= 400 Ko)."
+        },
+        "lastUpdatedDate": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Date de mise à jour affichée en pied de page (JJ/MM/AAAA)."
+        },
+        "autoUpdateDate": {
+          "type": "boolean",
+          "description": "Mettre à jour automatiquement la date lors des modifications."
+        },
+        "headerHeightPx": {
+          "type": "number",
+          "description": "Hauteur du bandeau rouge supérieur en pixels (48 à 140)."
+        },
+        "zoneScale": {
+          "type": "number",
+          "description": "Facteur d'agrandissement de la zone active (0.95 à 1.6)."
+        },
+        "emergencyBoxShape": {
+          "type": "string",
+          "enum": ["pills", "stacked", "rounded", "chamfer"],
+          "description": "Style géométrique des encadrés numéros d'urgence en bas d'affiche."
+        },
+        "activeZoneId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Identifiant de la zone actuellement affichée."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Horodatage serveur de création."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Horodatage serveur de dernière modification."
+        }
+      },
+      "required": [
+        "name",
+        "ownerUid",
+        "sharedUids",
+        "companyName",
+        "companyLogoDataUrl",
+        "lastUpdatedDate",
+        "autoUpdateDate",
+        "headerHeightPx",
+        "zoneScale",
+        "emergencyBoxShape",
+        "activeZoneId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Zone": {
+      "title": "Zone",
+      "description": "Zone géographique ou secteur du site avec ses zones de proximité.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Nom en majuscules de la zone."
+        },
+        "nearbyZoneIds": {
+          "type": "array",
+          "description": "Identifiants des zones considérées comme proches."
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID du propriétaire du site parent."
+        },
+        "sharedUids": {
+          "type": "array",
+          "description": "Liste bornée (max 10) des UID autorisés."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["name", "nearbyZoneIds", "ownerUid", "sharedUids", "createdAt", "updatedAt"]
+    },
+    "Person": {
+      "title": "Person",
+      "description": "Membre du personnel d'urgence (SST, EPI, Guide d'évacuation, Serre-file).",
+      "type": "object",
+      "properties": {
+        "lastName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "firstName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "internalNumber": {
+          "type": "string",
+          "pattern": "^\\d{4}(\\/\\d{4})?$",
+          "maxLength": 9,
+          "description": "Numéro interne à 4 chiffres ou deux numéros à 4 chiffres séparés par /."
+        },
+        "roles": {
+          "type": "array",
+          "description": "Liste des rôles (SST, EPI, GUIDE, SERRE_FILE)."
+        },
+        "primaryZoneId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "nearbyZoneIds": {
+          "type": "array",
+          "description": "Zones proches supplémentaires pour cette personne."
+        },
+        "trainingExpiryDate": {
+          "type": "string",
+          "pattern": "^(\\d{4}-\\d{2}-\\d{2})?$",
+          "maxLength": 10,
+          "description": "Date de fin de validité de la formation au format YYYY-MM-DD."
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "sharedUids": {
+          "type": "array",
+          "description": "Liste bornée (max 10) des UID autorisés."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "lastName",
+        "firstName",
+        "internalNumber",
+        "roles",
+        "primaryZoneId",
+        "nearbyZoneIds",
+        "trainingExpiryDate",
+        "isActive",
+        "ownerUid",
+        "sharedUids",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SiteMember": {
+      "title": "SiteMember",
+      "description": "Collaborateur autorisé sur un site d'annuaire d'urgence.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "siteOwnerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["editor", "viewer"]
+        },
+        "inviteCode": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 64
+        },
+        "joinedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "siteOwnerUid", "displayName", "role", "inviteCode", "joinedAt"]
+    },
+    "SiteInvite": {
+      "title": "SiteInvite",
+      "description": "Code d'invitation pour rejoindre un site d'annuaire d'urgence.",
+      "type": "object",
+      "properties": {
+        "siteId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "enum": ["editor", "viewer"]
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["siteId", "createdByUid", "role", "active", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/sites/{siteId}": {
+      "schema": { "$ref": "#/entities/SiteConfig" },
+      "description": "Configuration et paramètres d'affichage d'un site."
+    },
+    "/sites/{siteId}/zones/{zoneId}": {
+      "schema": { "$ref": "#/entities/Zone" },
+      "description": "Zones configurées pour le site."
+    },
+    "/sites/{siteId}/people/{personId}": {
+      "schema": { "$ref": "#/entities/Person" },
+      "description": "Personnel d'urgence rattaché au site."
+    },
+    "/sites/{siteId}/members/{memberUid}": {
+      "schema": { "$ref": "#/entities/SiteMember" },
+      "description": "Membres collaborateurs ayant rejoint le site."
+    },
+    "/siteInvites/{inviteCode}": {
+      "schema": { "$ref": "#/entities/SiteInvite" },
+      "description": "Codes d'invitation actifs pour partager l'accès au site."
+    }
+  }
+}

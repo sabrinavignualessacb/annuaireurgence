@@ -1,0 +1,620 @@
+import { User } from 'firebase/auth';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  setDoc,
+  Timestamp,
+  updateDoc,
+  where,
+  writeBatch,
+} from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import {
+  AppData,
+  EmergencyBoxShape,
+  EmergencyRole,
+  Person,
+  PosterSettings,
+  Zone,
+} from '../types';
+import { getTodayFrenchDate, normalizeInternalNumber } from '../utils/validation';
+
+export const BOOTSTRAPPED_ADMIN_EMAIL = 'service.qse.33450@gmail.com';
+export const DEFAULT_ADMIN_SITE_ID = 'site-principal';
+
+export interface SiteMemberRecord {
+  uid: string;
+  siteOwnerUid: string;
+  displayName: string;
+  role: 'editor' | 'viewer';
+  inviteCode: string;
+}
+
+export interface SiteInviteRecord {
+  code: string;
+  siteId: string;
+  role: 'editor' | 'viewer';
+  active: boolean;
+}
+
+function sanitizeId(raw: string): string {
+  const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 120);
+  return cleaned || `id-${crypto.randomUUID()}`;
+}
+
+function buildSitePayload(
+  siteName: string,
+  ownerUid: string,
+  sharedUids: string[],
+  data: AppData,
+  isCreate: boolean
+) {
+  const logo = (data.settings.companyLogoDataUrl || '').slice(0, 399000);
+  const validShape: EmergencyBoxShape = ['pills', 'stacked', 'rounded', 'chamfer'].includes(
+    data.settings.emergencyBoxShape
+  )
+    ? data.settings.emergencyBoxShape
+    : 'pills';
+
+  const base = {
+    name: siteName.slice(0, 120) || 'Site Principal',
+    sharedUids: Array.from(new Set(sharedUids)).slice(0, 10),
+    companyName: (data.settings.companyName || '').slice(0, 120),
+    companyLogoDataUrl: logo,
+    lastUpdatedDate: (data.settings.lastUpdatedDate || getTodayFrenchDate()).slice(0, 20),
+    autoUpdateDate: Boolean(data.settings.autoUpdateDate),
+    headerHeightPx: Math.min(140, Math.max(48, Number(data.settings.headerHeightPx || 68))),
+    zoneScale: Math.min(1.6, Math.max(0.95, Number(data.settings.zoneScale || 1.15))),
+    emergencyBoxShape: validShape,
+    activeZoneId: (data.activeZoneId || '').slice(0, 128),
+    updatedAt: serverTimestamp(),
+  };
+
+  if (isCreate) {
+    return {
+      ...base,
+      ownerUid,
+      createdAt: serverTimestamp(),
+    };
+  }
+  return base;
+}
+
+function buildZonePayload(
+  zone: Zone,
+  ownerUid: string,
+  sharedUids: string[],
+  isCreate: boolean
+) {
+  const base = {
+    name: (zone.name || 'ZONE').trim().toUpperCase().slice(0, 120),
+    nearbyZoneIds: (zone.nearbyZoneIds || []).slice(0, 50).map((id) => String(id).slice(0, 128)),
+    updatedAt: serverTimestamp(),
+  };
+  if (isCreate) {
+    return {
+      ...base,
+      ownerUid,
+      sharedUids: Array.from(new Set(sharedUids)).slice(0, 10),
+      createdAt: serverTimestamp(),
+    };
+  }
+  return base;
+}
+
+function buildPersonPayload(
+  person: Person,
+  ownerUid: string,
+  sharedUids: string[],
+  isCreate: boolean
+) {
+  const validRoles = (person.roles || []).filter((r): r is EmergencyRole =>
+    ['SST', 'EPI', 'GUIDE', 'SERRE_FILE'].includes(r)
+  );
+  const rolesToSave: EmergencyRole[] = validRoles.length > 0 ? validRoles.slice(0, 4) : ['SST'];
+  const normNum = normalizeInternalNumber(person.internalNumber || '0000');
+  const validNum = /^\d{4}(\/\d{4})?$/.test(normNum) ? normNum : '0000';
+  const expiry = /^\d{4}-\d{2}-\d{2}$/.test(person.trainingExpiryDate || '')
+    ? person.trainingExpiryDate
+    : '';
+
+  const base = {
+    lastName: (person.lastName || 'INCONNU').trim().toUpperCase().slice(0, 80),
+    firstName: (person.firstName || '—').trim().slice(0, 80),
+    internalNumber: validNum,
+    roles: rolesToSave,
+    primaryZoneId: String(person.primaryZoneId || '').slice(0, 128),
+    nearbyZoneIds: (person.nearbyZoneIds || []).slice(0, 50).map((id) => String(id).slice(0, 128)),
+    trainingExpiryDate: expiry,
+    isActive: Boolean(person.isActive),
+    updatedAt: serverTimestamp(),
+  };
+
+  if (isCreate) {
+    return {
+      ...base,
+      ownerUid,
+      sharedUids: Array.from(new Set(sharedUids)).slice(0, 10),
+      createdAt: serverTimestamp(),
+    };
+  }
+  return base;
+}
+
+/**
+ * Résout l'identifiant du site Firestore pour l'utilisateur connecté,
+ * ou initialise un site avec les données locales s'il n'en possède pas encore.
+ */
+export async function resolveOrInitializeUserSite(
+  user: User,
+  localFallbackData: AppData,
+  preferredSiteId?: string | null
+): Promise<{ siteId: string; ownerUid: string; sharedUids: string[] }> {
+  const isAdmin =
+    Boolean(user.emailVerified) &&
+    user.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+
+  // 1. Si un site préféré est fourni et accessible
+  if (preferredSiteId && /^[a-zA-Z0-9_-]+$/.test(preferredSiteId)) {
+    const siteRef = doc(db, 'sites', preferredSiteId);
+    try {
+      const snap = await getDoc(siteRef);
+      if (snap.exists()) {
+        const d = snap.data();
+        const shared = Array.isArray(d.sharedUids) ? d.sharedUids.map(String) : [];
+        if (isAdmin || d.ownerUid === user.uid || shared.includes(user.uid)) {
+          return {
+            siteId: snap.id,
+            ownerUid: String(d.ownerUid),
+            sharedUids: shared,
+          };
+        }
+      }
+    } catch {
+      // Fall through to discovery
+    }
+  }
+
+  // 2. Pour l'administrateur QSE, vérifier d'abord 'site-principal'
+  if (isAdmin) {
+    const principalRef = doc(db, 'sites', DEFAULT_ADMIN_SITE_ID);
+    try {
+      const snap = await getDoc(principalRef);
+      if (snap.exists()) {
+        const d = snap.data();
+        return {
+          siteId: snap.id,
+          ownerUid: String(d.ownerUid),
+          sharedUids: Array.isArray(d.sharedUids) ? d.sharedUids.map(String) : [user.uid],
+        };
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, `sites/${DEFAULT_ADMIN_SITE_ID}`);
+    }
+  }
+
+  // 3. Rechercher un site existant dont l'utilisateur est propriétaire ou co-éditeur
+  try {
+    const q = query(
+      collection(db, 'sites'),
+      where('sharedUids', 'array-contains', user.uid)
+    );
+    const listSnap = await getDocs(q);
+    if (!listSnap.empty) {
+      const first = listSnap.docs[0];
+      const d = first.data();
+      return {
+        siteId: first.id,
+        ownerUid: String(d.ownerUid),
+        sharedUids: Array.isArray(d.sharedUids) ? d.sharedUids.map(String) : [user.uid],
+      };
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'sites');
+  }
+
+  // 4. Aucun site trouvé : créer le site et importer les données locales en batch
+  const newSiteId = isAdmin
+    ? DEFAULT_ADMIN_SITE_ID
+    : sanitizeId(`site-${user.uid.slice(0, 16)}`);
+  const sharedUids = [user.uid];
+
+  await seedEntireSiteToFirestore(newSiteId, user.uid, sharedUids, localFallbackData);
+
+  return {
+    siteId: newSiteId,
+    ownerUid: user.uid,
+    sharedUids,
+  };
+}
+
+export async function seedEntireSiteToFirestore(
+  siteId: string,
+  ownerUid: string,
+  sharedUids: string[],
+  data: AppData
+): Promise<void> {
+  const siteRef = doc(db, 'sites', siteId);
+  try {
+    // Nettoyer d'abord les anciennes sous-collections si le site existe déjà
+    const existingZones = await getDocs(collection(db, 'sites', siteId, 'zones'));
+    const existingPeople = await getDocs(collection(db, 'sites', siteId, 'people'));
+
+    const batch = writeBatch(db);
+    existingZones.forEach((d) => batch.delete(d.ref));
+    existingPeople.forEach((d) => batch.delete(d.ref));
+
+    batch.set(
+      siteRef,
+      buildSitePayload(data.settings.companyName || 'Site Principal', ownerUid, sharedUids, data, true)
+    );
+
+    data.zones.forEach((zone) => {
+      const zId = sanitizeId(zone.id);
+      const zRef = doc(db, 'sites', siteId, 'zones', zId);
+      batch.set(zRef, buildZonePayload({ ...zone, id: zId }, ownerUid, sharedUids, true));
+    });
+
+    data.people.forEach((person) => {
+      const pId = sanitizeId(person.id);
+      const pRef = doc(db, 'sites', siteId, 'people', pId);
+      batch.set(pRef, buildPersonPayload({ ...person, id: pId }, ownerUid, sharedUids, true));
+    });
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `sites/${siteId}`);
+  }
+}
+
+export function subscribeToSiteData(
+  siteId: string,
+  user: User,
+  onUpdate: (partial: {
+    settings?: PosterSettings;
+    activeZoneId?: string;
+    zones?: Zone[];
+    people?: Person[];
+    ownerUid?: string;
+    sharedUids?: string[];
+  }) => void
+): () => void {
+  const isAdmin =
+    Boolean(user.emailVerified) &&
+    user.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+
+  const sitePath = `sites/${siteId}`;
+  const zonesPath = `sites/${siteId}/zones`;
+  const peoplePath = `sites/${siteId}/people`;
+
+  const unsubSite = onSnapshot(
+    doc(db, 'sites', siteId),
+    (snap) => {
+      if (!snap.exists()) return;
+      const d = snap.data();
+      onUpdate({
+        ownerUid: String(d.ownerUid || ''),
+        sharedUids: Array.isArray(d.sharedUids) ? d.sharedUids.map(String) : [],
+        activeZoneId: String(d.activeZoneId || ''),
+        settings: {
+          companyLogoDataUrl: d.companyLogoDataUrl ? String(d.companyLogoDataUrl) : null,
+          companyName: String(d.companyName || 'ENTREPRISE'),
+          lastUpdatedDate: String(d.lastUpdatedDate || getTodayFrenchDate()),
+          autoUpdateDate: Boolean(d.autoUpdateDate),
+          headerHeightPx: Number(d.headerHeightPx || 68),
+          zoneScale: Number(d.zoneScale || 1.15),
+          emergencyBoxShape: (['pills', 'stacked', 'rounded', 'chamfer'].includes(
+            String(d.emergencyBoxShape)
+          )
+            ? d.emergencyBoxShape
+            : 'pills') as EmergencyBoxShape,
+        },
+      });
+    },
+    (error) => handleFirestoreError(error, OperationType.GET, sitePath)
+  );
+
+  const zonesQuery = isAdmin
+    ? collection(db, 'sites', siteId, 'zones')
+    : query(collection(db, 'sites', siteId, 'zones'), where('sharedUids', 'array-contains', user.uid));
+
+  const unsubZones = onSnapshot(
+    zonesQuery,
+    (snap) => {
+      const zones: Zone[] = snap.docs.map((docSnap) => {
+        const d = docSnap.data();
+        return {
+          id: docSnap.id,
+          name: String(d.name || 'ZONE'),
+          nearbyZoneIds: Array.isArray(d.nearbyZoneIds) ? d.nearbyZoneIds.map(String) : [],
+        };
+      });
+      zones.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+      onUpdate({ zones });
+    },
+    (error) => handleFirestoreError(error, OperationType.LIST, zonesPath)
+  );
+
+  const peopleQuery = isAdmin
+    ? collection(db, 'sites', siteId, 'people')
+    : query(
+        collection(db, 'sites', siteId, 'people'),
+        where('sharedUids', 'array-contains', user.uid)
+      );
+
+  const unsubPeople = onSnapshot(
+    peopleQuery,
+    (snap) => {
+      const people: Person[] = snap.docs.map((docSnap) => {
+        const d = docSnap.data();
+        return {
+          id: docSnap.id,
+          lastName: String(d.lastName || ''),
+          firstName: String(d.firstName || ''),
+          internalNumber: String(d.internalNumber || '0000'),
+          roles: Array.isArray(d.roles) ? (d.roles as EmergencyRole[]) : [],
+          primaryZoneId: String(d.primaryZoneId || ''),
+          nearbyZoneIds: Array.isArray(d.nearbyZoneIds) ? d.nearbyZoneIds.map(String) : [],
+          trainingExpiryDate: String(d.trainingExpiryDate || ''),
+          isActive: Boolean(d.isActive),
+        };
+      });
+      onUpdate({ people });
+    },
+    (error) => handleFirestoreError(error, OperationType.LIST, peoplePath)
+  );
+
+  return () => {
+    unsubSite();
+    unsubZones();
+    unsubPeople();
+  };
+}
+
+export async function updateSiteSettingsInFirestore(
+  siteId: string,
+  settings: PosterSettings,
+  activeZoneId: string
+): Promise<void> {
+  const path = `sites/${siteId}`;
+  try {
+    await updateDoc(doc(db, 'sites', siteId), {
+      name: (settings.companyName || 'Site Principal').slice(0, 120),
+      companyName: (settings.companyName || '').slice(0, 120),
+      companyLogoDataUrl: (settings.companyLogoDataUrl || '').slice(0, 399000),
+      lastUpdatedDate: (settings.lastUpdatedDate || getTodayFrenchDate()).slice(0, 20),
+      autoUpdateDate: Boolean(settings.autoUpdateDate),
+      headerHeightPx: Math.min(140, Math.max(48, Number(settings.headerHeightPx || 68))),
+      zoneScale: Math.min(1.6, Math.max(0.95, Number(settings.zoneScale || 1.15))),
+      emergencyBoxShape: settings.emergencyBoxShape || 'pills',
+      activeZoneId: (activeZoneId || '').slice(0, 128),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function upsertZoneInFirestore(
+  siteId: string,
+  zone: Zone,
+  ownerUid: string,
+  sharedUids: string[],
+  isNew: boolean
+): Promise<void> {
+  const zId = sanitizeId(zone.id);
+  const path = `sites/${siteId}/zones/${zId}`;
+  try {
+    if (isNew) {
+      await setDoc(
+        doc(db, 'sites', siteId, 'zones', zId),
+        buildZonePayload({ ...zone, id: zId }, ownerUid, sharedUids, true)
+      );
+    } else {
+      await updateDoc(
+        doc(db, 'sites', siteId, 'zones', zId),
+        buildZonePayload({ ...zone, id: zId }, ownerUid, sharedUids, false)
+      );
+    }
+  } catch (error) {
+    handleFirestoreError(error, isNew ? OperationType.CREATE : OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteZoneInFirestore(siteId: string, zoneId: string): Promise<void> {
+  const zId = sanitizeId(zoneId);
+  const path = `sites/${siteId}/zones/${zId}`;
+  try {
+    await deleteDoc(doc(db, 'sites', siteId, 'zones', zId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function upsertPersonInFirestore(
+  siteId: string,
+  person: Person,
+  ownerUid: string,
+  sharedUids: string[],
+  isNew: boolean
+): Promise<void> {
+  const pId = sanitizeId(person.id);
+  const path = `sites/${siteId}/people/${pId}`;
+  try {
+    if (isNew) {
+      await setDoc(
+        doc(db, 'sites', siteId, 'people', pId),
+        buildPersonPayload({ ...person, id: pId }, ownerUid, sharedUids, true)
+      );
+    } else {
+      await updateDoc(
+        doc(db, 'sites', siteId, 'people', pId),
+        buildPersonPayload({ ...person, id: pId }, ownerUid, sharedUids, false)
+      );
+    }
+  } catch (error) {
+    handleFirestoreError(error, isNew ? OperationType.CREATE : OperationType.UPDATE, path);
+  }
+}
+
+export async function deletePersonInFirestore(siteId: string, personId: string): Promise<void> {
+  const pId = sanitizeId(personId);
+  const path = `sites/${siteId}/people/${pId}`;
+  try {
+    await deleteDoc(doc(db, 'sites', siteId, 'people', pId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+// Partage d'équipe : codes d'invitation et membres
+export async function createSiteInviteInFirestore(
+  siteId: string,
+  createdByUid: string,
+  role: 'editor' | 'viewer' = 'editor'
+): Promise<string> {
+  const code = `QSE-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  const path = `siteInvites/${code}`;
+  try {
+    await setDoc(doc(db, 'siteInvites', code), {
+      siteId,
+      createdByUid,
+      role,
+      active: true,
+      createdAt: serverTimestamp(),
+    });
+    return code;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function listSiteInvites(
+  siteId: string,
+  user: User
+): Promise<SiteInviteRecord[]> {
+  const isAdmin =
+    Boolean(user.emailVerified) &&
+    user.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+  try {
+    const q = isAdmin
+      ? query(collection(db, 'siteInvites'), where('siteId', '==', siteId))
+      : query(collection(db, 'siteInvites'), where('createdByUid', '==', user.uid));
+    const snap = await getDocs(q);
+    return snap.docs
+      .map((d) => {
+        const data = d.data();
+        return {
+          code: d.id,
+          siteId: String(data.siteId),
+          role: (data.role === 'viewer' ? 'viewer' : 'editor') as 'editor' | 'viewer',
+          active: Boolean(data.active),
+        };
+      })
+      .filter((inv) => inv.siteId === siteId);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'siteInvites');
+  }
+}
+
+export async function listSiteMembers(siteId: string): Promise<SiteMemberRecord[]> {
+  const path = `sites/${siteId}/members`;
+  try {
+    const snap = await getDocs(collection(db, 'sites', siteId, 'members'));
+    return snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        uid: d.id,
+        siteOwnerUid: String(data.siteOwnerUid || ''),
+        displayName: String(data.displayName || 'Collaborateur'),
+        role: (data.role === 'viewer' ? 'viewer' : 'editor') as 'editor' | 'viewer',
+        inviteCode: String(data.inviteCode || ''),
+      };
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+export async function joinSiteWithInviteCode(
+  inviteCodeRaw: string,
+  user: User
+): Promise<string> {
+  const code = inviteCodeRaw.trim().toUpperCase();
+  if (!/^[a-zA-Z0-9_-]{4,64}$/.test(code)) {
+    throw new Error('Format de code d’invitation invalide.');
+  }
+
+  const inviteSnap = await getDoc(doc(db, 'siteInvites', code));
+  if (!inviteSnap.exists()) {
+    throw new Error('Code d’invitation introuvable.');
+  }
+  const inviteData = inviteSnap.data();
+  if (!inviteData.active) {
+    throw new Error('Ce code d’invitation n’est plus actif.');
+  }
+  const siteId = String(inviteData.siteId);
+  const role = inviteData.role === 'viewer' ? 'viewer' : 'editor';
+
+  const siteSnap = await getDoc(doc(db, 'sites', siteId));
+  if (!siteSnap.exists()) {
+    throw new Error('Site introuvable.');
+  }
+  const siteOwnerUid = String(siteSnap.data().ownerUid);
+
+  const memberPath = `sites/${siteId}/members/${user.uid}`;
+  try {
+    await setDoc(doc(db, 'sites', siteId, 'members', user.uid), {
+      uid: user.uid,
+      siteOwnerUid,
+      displayName: (user.displayName || 'Collaborateur').slice(0, 120),
+      role,
+      inviteCode: code,
+      joinedAt: serverTimestamp(),
+    });
+    return siteId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, memberPath);
+  }
+}
+
+/**
+ * Ajoute les UID des membres du site dans `sharedUids` (site, zones et personnel)
+ * pour leur donner l'accès temps réel en lecture/écriture.
+ */
+export async function syncSharedUidsForSite(
+  siteId: string,
+  ownerUid: string,
+  memberUids: string[]
+): Promise<void> {
+  const nextShared = Array.from(new Set([ownerUid, ...memberUids])).slice(0, 10);
+  try {
+    const zonesSnap = await getDocs(collection(db, 'sites', siteId, 'zones'));
+    const peopleSnap = await getDocs(collection(db, 'sites', siteId, 'people'));
+
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'sites', siteId), {
+      sharedUids: nextShared,
+      updatedAt: serverTimestamp(),
+    });
+    zonesSnap.forEach((z) => {
+      batch.update(z.ref, { sharedUids: nextShared, updatedAt: serverTimestamp() });
+    });
+    peopleSnap.forEach((p) => {
+      batch.update(p.ref, { sharedUids: nextShared, updatedAt: serverTimestamp() });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `sites/${siteId}`);
+  }
+}
+
+export function isTimestamp(val: unknown): val is Timestamp {
+  return val instanceof Timestamp;
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Annuaire d'Urgence A3",
+  "description": "Application de gestion et d'impression d'annuaires d'urgence par zone au format A3 paysage (SST, EPI, Évacuation).",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
