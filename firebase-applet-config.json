@@ -1,12 +1,10 @@
 {
-  "projectId": "concentrated-battery-f6shk",
-  "appId": "1:1048418319513:web:30018c3f51c971ae24cc08",
-  "apiKey": "AIzaSyDMLYT0aA8fseEjnJOuPV_A5thpg2G6tGM",
-  "authDomain": "concentrated-battery-f6shk.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-annuairedurgence-cb378760-35d2-447f-8f87-df6e2ac483fa",
-  "storageBucket": "concentrated-battery-f6shk.firebasestorage.app",
-  "messagingSenderId": "1048418319513",
-  "measurementId": "",
-  "oAuthClientId": "1048418319513-q55g23611vlk7ep5c3b03vh77l9lt9lk.apps.googleusercontent.com",
-  "recaptchaSiteKey": ""
+  "projectId": "annuaire-urgence",
+  "appId": "1:359084065465:web:81d3969c091a7906025168",
+  "apiKey": "AIzaSyAB64rQxbw88beh404CtxVBk-xbRKjO4NM",
+  "authDomain": "annuaire-urgence.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "annuaire-urgence.firebasestorage.app",
+  "messagingSenderId": "359084065465",
+  "measurementId": "G-Z6HV48Q9XR"
 }
