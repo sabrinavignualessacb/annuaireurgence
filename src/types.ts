@@ -22,6 +22,14 @@ export type EmergencyBoxShape = 'pills' | 'stacked' | 'rounded' | 'chamfer';
 
 export interface PosterSettings {
   companyLogoDataUrl: string | null;
+  companyLogoSizePx: number; // Hauteur du logo entreprise (28 à 84 px)
+  sstLogoDataUrl: string | null;
+  epiLogoDataUrl: string | null;
+  evacuationLogoDataUrl: string | null;
+  serreFileLogoDataUrl: string | null;
+  guideLogoDataUrl: string | null;
+  pictogramSizePx: number; // Taille des logos SST / EPI / Évacuation (32 à 64 px)
+  roleBadgeSizePx: number; // Taille des logos Serre-file / Guide (20 à 44 px)
   companyName: string;
   lastUpdatedDate: string; // DD/MM/YYYY
   autoUpdateDate: boolean;

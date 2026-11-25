@@ -99,6 +99,14 @@ service cloud.firestore {
           'sharedUids',
           'companyName',
           'companyLogoDataUrl',
+          'companyLogoSizePx',
+          'sstLogoDataUrl',
+          'epiLogoDataUrl',
+          'evacuationLogoDataUrl',
+          'serreFileLogoDataUrl',
+          'guideLogoDataUrl',
+          'pictogramSizePx',
+          'roleBadgeSizePx',
           'lastUpdatedDate',
           'autoUpdateDate',
           'headerHeightPx',
@@ -113,6 +121,14 @@ service cloud.firestore {
         && isValidSharedUids(data.sharedUids)
         && data.companyName is string && data.companyName.size() <= 120
         && data.companyLogoDataUrl is string && data.companyLogoDataUrl.size() <= 400000
+        && (!('companyLogoSizePx' in data) || (data.companyLogoSizePx is number && data.companyLogoSizePx >= 24 && data.companyLogoSizePx <= 96))
+        && (!('sstLogoDataUrl' in data) || (data.sstLogoDataUrl is string && data.sstLogoDataUrl.size() <= 100000))
+        && (!('epiLogoDataUrl' in data) || (data.epiLogoDataUrl is string && data.epiLogoDataUrl.size() <= 100000))
+        && (!('evacuationLogoDataUrl' in data) || (data.evacuationLogoDataUrl is string && data.evacuationLogoDataUrl.size() <= 100000))
+        && (!('serreFileLogoDataUrl' in data) || (data.serreFileLogoDataUrl is string && data.serreFileLogoDataUrl.size() <= 100000))
+        && (!('guideLogoDataUrl' in data) || (data.guideLogoDataUrl is string && data.guideLogoDataUrl.size() <= 100000))
+        && (!('pictogramSizePx' in data) || (data.pictogramSizePx is number && data.pictogramSizePx >= 28 && data.pictogramSizePx <= 68))
+        && (!('roleBadgeSizePx' in data) || (data.roleBadgeSizePx is number && data.roleBadgeSizePx >= 18 && data.roleBadgeSizePx <= 48))
         && data.lastUpdatedDate is string && data.lastUpdatedDate.size() <= 20
         && data.autoUpdateDate is bool
         && data.headerHeightPx is number && data.headerHeightPx >= 48 && data.headerHeightPx <= 140
@@ -237,11 +253,19 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
-          // Action 1 : Mise à jour des paramètres / logo / zone active
+          // Action 1 : Mise à jour des paramètres / logos / zone active
           incoming().diff(existing()).affectedKeys().hasOnly([
             'name',
             'companyName',
             'companyLogoDataUrl',
+            'companyLogoSizePx',
+            'sstLogoDataUrl',
+            'epiLogoDataUrl',
+            'evacuationLogoDataUrl',
+            'serreFileLogoDataUrl',
+            'guideLogoDataUrl',
+            'pictogramSizePx',
+            'roleBadgeSizePx',
             'lastUpdatedDate',
             'autoUpdateDate',
             'headerHeightPx',

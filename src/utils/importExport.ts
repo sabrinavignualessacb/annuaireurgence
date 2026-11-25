@@ -107,6 +107,47 @@ export function validateAndParseJsonImport(rawText: string): AppData {
         parsed.settings && typeof parsed.settings.companyLogoDataUrl === 'string'
           ? parsed.settings.companyLogoDataUrl
           : null,
+      companyLogoSizePx:
+        parsed.settings &&
+        typeof parsed.settings.companyLogoSizePx === 'number' &&
+        parsed.settings.companyLogoSizePx >= 24 &&
+        parsed.settings.companyLogoSizePx <= 96
+          ? parsed.settings.companyLogoSizePx
+          : 54,
+      sstLogoDataUrl:
+        parsed.settings && typeof parsed.settings.sstLogoDataUrl === 'string'
+          ? parsed.settings.sstLogoDataUrl
+          : null,
+      epiLogoDataUrl:
+        parsed.settings && typeof parsed.settings.epiLogoDataUrl === 'string'
+          ? parsed.settings.epiLogoDataUrl
+          : null,
+      evacuationLogoDataUrl:
+        parsed.settings && typeof parsed.settings.evacuationLogoDataUrl === 'string'
+          ? parsed.settings.evacuationLogoDataUrl
+          : null,
+      serreFileLogoDataUrl:
+        parsed.settings && typeof parsed.settings.serreFileLogoDataUrl === 'string'
+          ? parsed.settings.serreFileLogoDataUrl
+          : null,
+      guideLogoDataUrl:
+        parsed.settings && typeof parsed.settings.guideLogoDataUrl === 'string'
+          ? parsed.settings.guideLogoDataUrl
+          : null,
+      pictogramSizePx:
+        parsed.settings &&
+        typeof parsed.settings.pictogramSizePx === 'number' &&
+        parsed.settings.pictogramSizePx >= 28 &&
+        parsed.settings.pictogramSizePx <= 68
+          ? parsed.settings.pictogramSizePx
+          : 44,
+      roleBadgeSizePx:
+        parsed.settings &&
+        typeof parsed.settings.roleBadgeSizePx === 'number' &&
+        parsed.settings.roleBadgeSizePx >= 18 &&
+        parsed.settings.roleBadgeSizePx <= 48
+          ? parsed.settings.roleBadgeSizePx
+          : 24,
       companyName:
         parsed.settings && typeof parsed.settings.companyName === 'string'
           ? parsed.settings.companyName

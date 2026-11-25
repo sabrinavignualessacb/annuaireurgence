@@ -12,6 +12,19 @@ import {
 import { CONFIDENTIALITY_NOTICE, PosterSettings } from '../types';
 import { compressLogoFileToDataUrl } from '../utils/imageCompress';
 import { getTodayFrenchDate } from '../utils/validation';
+import {
+  EpiPictogram,
+  EvacuationPictogram,
+  RoleLetterBadge,
+  SstPictogram,
+} from './SafetyPictograms';
+
+type RoleLogoKey =
+  | 'sstLogoDataUrl'
+  | 'epiLogoDataUrl'
+  | 'evacuationLogoDataUrl'
+  | 'serreFileLogoDataUrl'
+  | 'guideLogoDataUrl';
 
 interface SettingsPanelProps {
   settings: PosterSettings;
@@ -40,6 +53,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   cloudSyncSlot,
 }) => {
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const roleLogoInputRef = useRef<HTMLInputElement>(null);
+  const activeRoleLogoKeyRef = useRef<RoleLogoKey | null>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
 
@@ -54,7 +69,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const compressed = await compressLogoFileToDataUrl(file);
+      const compressed = await compressLogoFileToDataUrl(file, {
+        maxWidth: 600,
+        maxHeight: 240,
+        maxChars: 350000,
+      });
       onUpdateSettings({ companyLogoDataUrl: compressed });
       setFeedback({ type: 'success', message: 'Logo entreprise mis à jour.' });
     } catch (err) {
@@ -64,6 +83,32 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       });
     }
     e.target.value = '';
+  };
+
+  const handleRoleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const targetKey = activeRoleLogoKeyRef.current;
+    if (!file || !targetKey) return;
+    try {
+      const compressed = await compressLogoFileToDataUrl(file, {
+        maxWidth: 220,
+        maxHeight: 220,
+        maxChars: 90000,
+      });
+      onUpdateSettings({ [targetKey]: compressed } as Partial<PosterSettings>);
+      setFeedback({ type: 'success', message: 'Pictogramme mis à jour sur l’affiche.' });
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Erreur lors du chargement du pictogramme.',
+      });
+    }
+    e.target.value = '';
+  };
+
+  const triggerRoleLogoUpload = (key: RoleLogoKey) => {
+    activeRoleLogoKeyRef.current = key;
+    roleLogoInputRef.current?.click();
   };
 
   const handleJsonUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -102,6 +147,79 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
     e.target.value = '';
   };
+
+  const roleLogoItems: {
+    key: RoleLogoKey;
+    label: string;
+    subtitle: string;
+    preview: React.ReactNode;
+  }[] = [
+    {
+      key: 'sstLogoDataUrl',
+      label: 'S.S.T',
+      subtitle: 'En-tête colonne gauche',
+      preview: (
+        <SstPictogram
+          sizePx={40}
+          customLogoUrl={settings.sstLogoDataUrl}
+        />
+      ),
+    },
+    {
+      key: 'epiLogoDataUrl',
+      label: 'E.P.I',
+      subtitle: 'En-tête colonne centrale',
+      preview: (
+        <EpiPictogram
+          sizePx={40}
+          customLogoUrl={settings.epiLogoDataUrl}
+        />
+      ),
+    },
+    {
+      key: 'evacuationLogoDataUrl',
+      label: 'Évacuation Secours',
+      subtitle: 'En-tête colonne droite',
+      preview: (
+        <EvacuationPictogram
+          sizePx={40}
+          customLogoUrl={settings.evacuationLogoDataUrl}
+        />
+      ),
+    },
+    {
+      key: 'serreFileLogoDataUrl',
+      label: 'Serre-file',
+      subtitle: 'Sous-bloc orange',
+      preview: (
+        <RoleLetterBadge
+          letter="S"
+          sizePx={32}
+          customLogoUrl={settings.serreFileLogoDataUrl}
+        />
+      ),
+    },
+    {
+      key: 'guideLogoDataUrl',
+      label: "Guide d'évacuation",
+      subtitle: 'Sous-bloc jaune',
+      preview: (
+        <RoleLetterBadge
+          letter="G"
+          sizePx={32}
+          customLogoUrl={settings.guideLogoDataUrl}
+        />
+      ),
+    },
+  ];
+
+  const hasCustomRoleLogos = Boolean(
+    settings.sstLogoDataUrl ||
+      settings.epiLogoDataUrl ||
+      settings.evacuationLogoDataUrl ||
+      settings.serreFileLogoDataUrl ||
+      settings.guideLogoDataUrl
+  );
 
   return (
     <div className="space-y-5">
@@ -186,7 +304,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               }
               className="w-full accent-[#D91E18] cursor-pointer"
             />
-            <div className="flex items-center gap-2 pt-0.5">
+            <div className="flex items-center gap-2 pt-0.5 flex-wrap">
               {[
                 { label: 'Compact (56 px)', val: 56 },
                 { label: 'Standard (68 px)', val: 68 },
@@ -234,7 +352,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               }
               className="w-full accent-[#008749] cursor-pointer"
             />
-            <div className="flex items-center gap-2 pt-0.5">
+            <div className="flex items-center gap-2 pt-0.5 flex-wrap">
               {[
                 { label: '100%', val: 1.0 },
                 { label: '115%', val: 1.15 },
@@ -317,15 +435,159 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
       </div>
 
+      {/* Pictogrammes SST / EPI / Évacuation / Serre-file / Guide & Tailles */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h2 className="font-display font-bold text-lg text-slate-900">
+              Logos des rôles (SST / EPI / Évacuation / Serre-file / Guide)
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Remplacez n&apos;importe quel pictogramme par votre propre visuel (PNG, JPG, SVG) et réglez leur taille.
+            </p>
+          </div>
+          {(hasCustomRoleLogos ||
+            (settings.pictogramSizePx ?? 44) !== 44 ||
+            (settings.roleBadgeSizePx ?? 24) !== 24) && (
+            <button
+              type="button"
+              onClick={() =>
+                onUpdateSettings({
+                  sstLogoDataUrl: null,
+                  epiLogoDataUrl: null,
+                  evacuationLogoDataUrl: null,
+                  serreFileLogoDataUrl: null,
+                  guideLogoDataUrl: null,
+                  pictogramSizePx: 44,
+                  roleBadgeSizePx: 24,
+                })
+              }
+              className="self-start sm:self-auto px-3 py-1.5 text-xs font-medium text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              Tout remettre par défaut
+            </button>
+          )}
+        </div>
+
+        <input
+          ref={roleLogoInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleRoleLogoChange}
+          className="hidden"
+        />
+
+        {/* 5 cartes des pictogrammes modifiables */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {roleLogoItems.map((item) => {
+            const hasCustom = Boolean(settings[item.key]);
+            return (
+              <div
+                key={item.key}
+                className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-between gap-3"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-lg bg-white border border-slate-200 flex items-center justify-center shrink-0 p-1">
+                    {item.preview}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-slate-900 truncate">{item.label}</p>
+                    <p className="text-[11px] text-slate-500 truncate">{item.subtitle}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => triggerRoleLogoUpload(item.key)}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <ImagePlus className="w-3.5 h-3.5" />
+                    <span>{hasCustom ? 'Changer' : 'Modifier'}</span>
+                  </button>
+                  {hasCustom && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdateSettings({ [item.key]: null } as Partial<PosterSettings>)
+                      }
+                      title="Rétablir le pictogramme par défaut"
+                      className="p-1.5 text-red-700 border border-red-200 bg-white rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Réglages de grosseur des pictogrammes colonnes & badges */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-1">
+          <div className="space-y-2 p-4 rounded-lg bg-slate-50 border border-slate-200">
+            <div className="flex items-center justify-between gap-2">
+              <label
+                htmlFor="pictogram-size-range"
+                className="text-xs font-semibold text-slate-800"
+              >
+                Grosseur des logos SST / EPI / Évacuation
+              </label>
+              <span className="font-mono-num text-xs font-bold text-slate-900">
+                {settings.pictogramSizePx ?? 44} px
+              </span>
+            </div>
+            <input
+              id="pictogram-size-range"
+              type="range"
+              min={30}
+              max={64}
+              step={2}
+              value={settings.pictogramSizePx ?? 44}
+              onChange={(e) =>
+                onUpdateSettings({ pictogramSizePx: Number(e.target.value) })
+              }
+              className="w-full accent-slate-900 cursor-pointer"
+            />
+          </div>
+
+          <div className="space-y-2 p-4 rounded-lg bg-slate-50 border border-slate-200">
+            <div className="flex items-center justify-between gap-2">
+              <label
+                htmlFor="role-badge-size-range"
+                className="text-xs font-semibold text-slate-800"
+              >
+                Grosseur des logos Serre-file / Guide
+              </label>
+              <span className="font-mono-num text-xs font-bold text-slate-900">
+                {settings.roleBadgeSizePx ?? 24} px
+              </span>
+            </div>
+            <input
+              id="role-badge-size-range"
+              type="range"
+              min={18}
+              max={44}
+              step={2}
+              value={settings.roleBadgeSizePx ?? 24}
+              onChange={(e) =>
+                onUpdateSettings({ roleBadgeSizePx: Number(e.target.value) })
+              }
+              className="w-full accent-slate-900 cursor-pointer"
+            />
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
-        {/* Identité de l'affiche & Logo */}
+        {/* Identité de l'affiche & Logo entreprise */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-5">
           <div>
             <h2 className="font-display font-bold text-lg text-slate-900">
-              Logo &amp; Pied de page de l&apos;affiche
+              Logo entreprise &amp; Pied de page
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Personnalisez le logo affiché en bas à droite et la date de mise à jour.
+              Personnalisez le logo affiché en bas à droite, sa taille et la date de mise à jour.
             </p>
           </div>
 
@@ -374,6 +636,54 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </button>
                 )}
               </div>
+            </div>
+          </div>
+
+          {/* Grosseur du logo entreprise */}
+          <div className="space-y-2 p-3.5 rounded-lg bg-slate-50 border border-slate-200">
+            <div className="flex items-center justify-between gap-2">
+              <label
+                htmlFor="company-logo-size-range"
+                className="text-xs font-semibold text-slate-800"
+              >
+                Grosseur du logo entreprise sur l&apos;affiche
+              </label>
+              <span className="font-mono-num text-xs font-bold text-slate-900">
+                {settings.companyLogoSizePx ?? 54} px
+              </span>
+            </div>
+            <input
+              id="company-logo-size-range"
+              type="range"
+              min={28}
+              max={84}
+              step={2}
+              value={settings.companyLogoSizePx ?? 54}
+              onChange={(e) =>
+                onUpdateSettings({ companyLogoSizePx: Number(e.target.value) })
+              }
+              className="w-full accent-slate-900 cursor-pointer"
+            />
+            <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+              {[
+                { label: 'Petit (38 px)', val: 38 },
+                { label: 'Standard (54 px)', val: 54 },
+                { label: 'Grand (68 px)', val: 68 },
+                { label: 'Max (82 px)', val: 82 },
+              ].map((preset) => (
+                <button
+                  key={preset.val}
+                  type="button"
+                  onClick={() => onUpdateSettings({ companyLogoSizePx: preset.val })}
+                  className={`px-2 py-1 text-[11px] font-medium rounded border transition-colors cursor-pointer ${
+                    (settings.companyLogoSizePx ?? 54) === preset.val
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -449,7 +759,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               Sauvegarde complète (JSON)
             </h3>
             <p className="text-xs text-slate-600">
-              Inclut toutes les zones, les règles de proximité, le personnel, le logo et les réglages.
+              Inclut toutes les zones, les règles de proximité, le personnel, les logos et les réglages.
             </p>
             <div className="flex flex-wrap gap-2">
               <button

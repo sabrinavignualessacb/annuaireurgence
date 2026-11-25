@@ -31,6 +31,43 @@
           "maxLength": 400000,
           "description": "Logo de l'entreprise encodé en Data URL (compressé <= 400 Ko)."
         },
+        "companyLogoSizePx": {
+          "type": "number",
+          "description": "Hauteur du logo entreprise sur l'affiche en pixels (24 à 96)."
+        },
+        "sstLogoDataUrl": {
+          "type": "string",
+          "maxLength": 100000,
+          "description": "Logo personnalisé SST en Data URL (<= 100 Ko)."
+        },
+        "epiLogoDataUrl": {
+          "type": "string",
+          "maxLength": 100000,
+          "description": "Logo personnalisé EPI en Data URL (<= 100 Ko)."
+        },
+        "evacuationLogoDataUrl": {
+          "type": "string",
+          "maxLength": 100000,
+          "description": "Logo personnalisé Évacuation Secours en Data URL (<= 100 Ko)."
+        },
+        "serreFileLogoDataUrl": {
+          "type": "string",
+          "maxLength": 100000,
+          "description": "Logo personnalisé Serre-file en Data URL (<= 100 Ko)."
+        },
+        "guideLogoDataUrl": {
+          "type": "string",
+          "maxLength": 100000,
+          "description": "Logo personnalisé Guide d'évacuation en Data URL (<= 100 Ko)."
+        },
+        "pictogramSizePx": {
+          "type": "number",
+          "description": "Taille des pictogrammes SST / EPI / Évacuation en pixels (28 à 68)."
+        },
+        "roleBadgeSizePx": {
+          "type": "number",
+          "description": "Taille des logos Serre-file / Guide en pixels (18 à 48)."
+        },
         "lastUpdatedDate": {
           "type": "string",
           "maxLength": 20,

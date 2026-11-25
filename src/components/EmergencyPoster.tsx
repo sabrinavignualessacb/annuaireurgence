@@ -135,6 +135,9 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
   const zoneScale = settings.zoneScale ?? 1.15;
   const zoneBannerFontSize = Math.round(14 * zoneScale * 10) / 10;
   const zoneBannerPadY = Math.round(5 * zoneScale * 10) / 10;
+  const companyLogoSizePx = settings.companyLogoSizePx ?? 54;
+  const pictogramSizePx = settings.pictogramSizePx ?? 44;
+  const roleBadgeSizePx = settings.roleBadgeSizePx ?? 24;
 
   return (
     <div
@@ -163,7 +166,10 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
         <section className="border-[2.5px] border-[#008749] rounded-md flex flex-col min-h-0 bg-white overflow-hidden">
           {/* En-tête SST — hauteur fixe h-[78px] alignée avec EPI et Évacuation */}
           <div className="h-[78px] bg-[#ECFDF3] border-b-2 border-[#008749] px-3 flex items-center gap-2.5 shrink-0">
-            <SstPictogram className="w-11 h-11 shrink-0" />
+            <SstPictogram
+              sizePx={pictogramSizePx}
+              customLogoUrl={settings.sstLogoDataUrl}
+            />
             <div className="min-w-0">
               <h2 className="font-display font-extrabold text-[15px] text-[#006B39] leading-tight tracking-tight">
                 S.S.T
@@ -262,7 +268,10 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
         <section className="border-[2.5px] border-[#D91E18] rounded-md flex flex-col min-h-0 bg-white overflow-hidden">
           {/* En-tête EPI — hauteur fixe h-[78px] alignée avec SST et Évacuation */}
           <div className="h-[78px] bg-[#FEF2F2] border-b-2 border-[#D91E18] px-3 flex items-center gap-2.5 shrink-0">
-            <EpiPictogram className="w-11 h-11 shrink-0" />
+            <EpiPictogram
+              sizePx={pictogramSizePx}
+              customLogoUrl={settings.epiLogoDataUrl}
+            />
             <div className="min-w-0">
               <h2 className="font-display font-extrabold text-[13.5px] text-[#B91C1C] leading-[1.15] uppercase tracking-tight">
                 ÉQUIPIERS DE PREMIÈRE INTERVENTION
@@ -331,7 +340,10 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
         <section className="border-[2.5px] border-[#008749] rounded-md flex flex-col min-h-0 bg-white overflow-hidden">
           {/* En-tête Évacuation — hauteur fixe h-[78px] alignée avec SST et EPI */}
           <div className="h-[78px] bg-[#ECFDF3] border-b-2 border-[#008749] px-3 flex items-center gap-2.5 shrink-0">
-            <EvacuationPictogram className="w-11 h-11 shrink-0" />
+            <EvacuationPictogram
+              sizePx={pictogramSizePx}
+              customLogoUrl={settings.evacuationLogoDataUrl}
+            />
             <div className="min-w-0">
               <h2 className="font-display font-extrabold text-[15px] text-[#006B39] leading-tight uppercase tracking-tight">
                 ÉVACUATION SECOURS
@@ -358,7 +370,11 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
             {/* Sous-bloc SERRE-FILE (Couleur ORANGE) */}
             <div className="flex-1 min-h-0 overflow-hidden rounded-md border-[1.5px] border-[#EA580C] bg-[#FFF7ED]/70 px-2.5 py-2">
               <div className="flex items-center gap-2 pb-1.5 mb-1.5 border-b border-[#EA580C]/40">
-                <RoleLetterBadge letter="S" />
+                <RoleLetterBadge
+                  letter="S"
+                  sizePx={roleBadgeSizePx}
+                  customLogoUrl={settings.serreFileLogoDataUrl}
+                />
                 <h3 className="font-display font-extrabold text-[13px] text-[#C2410C] uppercase tracking-wide">
                   SERRE-FILE
                 </h3>
@@ -383,7 +399,11 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
             {/* Sous-bloc GUIDE D'ÉVACUATION (Couleur JAUNE) */}
             <div className="flex-1 min-h-0 overflow-hidden rounded-md border-[1.5px] border-[#CA8A04] bg-[#FEFCE8]/85 px-2.5 py-2">
               <div className="flex items-center gap-2 pb-1.5 mb-1.5 border-b border-[#CA8A04]/45">
-                <RoleLetterBadge letter="G" />
+                <RoleLetterBadge
+                  letter="G"
+                  sizePx={roleBadgeSizePx}
+                  customLogoUrl={settings.guideLogoDataUrl}
+                />
                 <h3 className="font-display font-extrabold text-[13px] text-[#A16207] uppercase tracking-wide">
                   GUIDE D&apos;ÉVACUATION
                 </h3>
@@ -597,12 +617,13 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
         )}
 
         {/* Emplacement logo entreprise sous la colonne Évacuation */}
-        <div className="border border-slate-300 rounded-xl bg-white px-3 py-1.5 flex items-center justify-center relative group">
+        <div className="border border-slate-300 rounded-xl bg-white px-3 py-1.5 flex items-center justify-center relative group overflow-hidden">
           {settings.companyLogoDataUrl ? (
             <img
               src={settings.companyLogoDataUrl}
               alt={settings.companyName || 'Logo entreprise'}
-              className="max-h-[54px] max-w-full object-contain"
+              style={{ height: `${companyLogoSizePx}px`, width: 'auto', maxWidth: '100%' }}
+              className="object-contain"
               referrerPolicy="no-referrer"
             />
           ) : (
