@@ -32,6 +32,7 @@ export const PersonModal: React.FC<PersonModalProps> = ({
   const [internalNumber, setInternalNumber] = useState('');
   const [roles, setRoles] = useState<EmergencyRole[]>(['SST']);
   const [primaryZoneId, setPrimaryZoneId] = useState(defaultZoneId);
+  const [coveredZoneIds, setCoveredZoneIds] = useState<string[]>([]);
   const [nearbyZoneIds, setNearbyZoneIds] = useState<string[]>([]);
   const [trainingExpiryDate, setTrainingExpiryDate] = useState('');
   const [isActive, setIsActive] = useState(true);
@@ -45,6 +46,7 @@ export const PersonModal: React.FC<PersonModalProps> = ({
       setInternalNumber(personToEdit.internalNumber);
       setRoles(personToEdit.roles);
       setPrimaryZoneId(personToEdit.primaryZoneId);
+      setCoveredZoneIds(personToEdit.coveredZoneIds || []);
       setNearbyZoneIds(personToEdit.nearbyZoneIds || []);
       setTrainingExpiryDate(personToEdit.trainingExpiryDate);
       setIsActive(personToEdit.isActive);
@@ -54,6 +56,7 @@ export const PersonModal: React.FC<PersonModalProps> = ({
       setInternalNumber('');
       setRoles(['SST']);
       setPrimaryZoneId(defaultZoneId || zones[0]?.id || '');
+      setCoveredZoneIds([]);
       setNearbyZoneIds([]);
       const nextYear = new Date();
       nextYear.setFullYear(nextYear.getFullYear() + 1);
@@ -69,6 +72,17 @@ export const PersonModal: React.FC<PersonModalProps> = ({
     setRoles((prev) =>
       prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
     );
+  };
+
+  const toggleCoveredZone = (zoneId: string) => {
+    setCoveredZoneIds((prev) => {
+      const exists = prev.includes(zoneId);
+      const next = exists ? prev.filter((id) => id !== zoneId) : [...prev, zoneId];
+      if (!exists) {
+        setNearbyZoneIds((nPrev) => nPrev.filter((id) => id !== zoneId));
+      }
+      return next;
+    });
   };
 
   const toggleNearbyZone = (zoneId: string) => {
@@ -106,6 +120,7 @@ export const PersonModal: React.FC<PersonModalProps> = ({
       return;
     }
 
+    const cleanCovered = coveredZoneIds.filter((id) => id !== primaryZoneId);
     onSave(
       {
         lastName: cleanLast,
@@ -113,7 +128,10 @@ export const PersonModal: React.FC<PersonModalProps> = ({
         internalNumber: cleanNum,
         roles,
         primaryZoneId,
-        nearbyZoneIds: nearbyZoneIds.filter((id) => id !== primaryZoneId),
+        coveredZoneIds: cleanCovered,
+        nearbyZoneIds: nearbyZoneIds.filter(
+          (id) => id !== primaryZoneId && !cleanCovered.includes(id)
+        ),
         trainingExpiryDate,
         isActive,
       },
@@ -221,6 +239,7 @@ export const PersonModal: React.FC<PersonModalProps> = ({
                 onChange={(e) => {
                   const newZoneId = e.target.value;
                   setPrimaryZoneId(newZoneId);
+                  setCoveredZoneIds((prev) => prev.filter((id) => id !== newZoneId));
                   setNearbyZoneIds((prev) => prev.filter((id) => id !== newZoneId));
                 }}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-red-600/20 focus:border-red-600"
@@ -314,9 +333,47 @@ export const PersonModal: React.FC<PersonModalProps> = ({
             </div>
           </div>
 
-          {/* Proximité spécifique */}
+          {/* Zones supplémentaires couvertes directement */}
           {zones.length > 1 && (
-            <div className="pt-1 border-t border-slate-100">
+            <div className="pt-2 border-t border-slate-100">
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Autres zones couvertes directement (multi-zones, optionnel)
+              </label>
+              <p className="text-[11px] text-slate-500 mb-2">
+                La personne apparaîtra directement dans le bloc principal de chacune des zones cochées.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {zones
+                  .filter((z) => z.id !== primaryZoneId)
+                  .map((z) => {
+                    const checked = coveredZoneIds.includes(z.id);
+                    return (
+                      <label
+                        key={z.id}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs cursor-pointer transition-colors ${
+                          checked
+                            ? 'border-emerald-700 bg-emerald-50 text-emerald-900 font-semibold'
+                            : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleCoveredZone(z.id)}
+                          className="w-3.5 h-3.5 accent-emerald-700 cursor-pointer"
+                        />
+                        <span>{z.name}</span>
+                      </label>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+
+          {/* Proximité spécifique */}
+          {zones.filter((z) => z.id !== primaryZoneId && !coveredZoneIds.includes(z.id)).length >
+            0 && (
+            <div className="pt-2 border-t border-slate-100">
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Apparaître aussi en « PROCHE DE LA ZONE » pour (optionnel)
               </label>
@@ -325,7 +382,7 @@ export const PersonModal: React.FC<PersonModalProps> = ({
               </p>
               <div className="flex flex-wrap gap-2">
                 {zones
-                  .filter((z) => z.id !== primaryZoneId)
+                  .filter((z) => z.id !== primaryZoneId && !coveredZoneIds.includes(z.id))
                   .map((z) => {
                     const checked = nearbyZoneIds.includes(z.id);
                     return (

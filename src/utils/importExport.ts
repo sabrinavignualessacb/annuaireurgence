@@ -89,6 +89,11 @@ export function validateAndParseJsonImport(rawText: string): AppData {
       primaryZoneId: validZoneIds.has(String(p.primaryZoneId))
         ? String(p.primaryZoneId)
         : fallbackZoneId,
+      coveredZoneIds: Array.isArray(p.coveredZoneIds)
+        ? p.coveredZoneIds.filter(
+            (zid) => validZoneIds.has(String(zid)) && String(zid) !== String(p.primaryZoneId)
+          )
+        : [],
       nearbyZoneIds: Array.isArray(p.nearbyZoneIds)
         ? p.nearbyZoneIds.filter((zid) => validZoneIds.has(String(zid)))
         : [],
@@ -327,22 +332,41 @@ export async function parseSpreadsheetFile(
       );
     }
 
-    const rawZone = String(
-      mapped.zoneprincipale ?? mapped.zone ?? mapped.secteur ?? existingZones[0]?.name ?? 'ZONE 1'
-    )
-      .trim()
-      .toUpperCase();
+    const rawZoneCell = String(
+      mapped.zoneprincipale ??
+        mapped.zones ??
+        mapped.zone ??
+        mapped.secteur ??
+        existingZones[0]?.name ??
+        'ZONE 1'
+    );
 
-    let zone = zoneByName.get(rawZone);
-    if (!zone) {
-      zone = {
-        id: `zone-${crypto.randomUUID()}`,
-        name: rawZone || 'NOUVELLE ZONE',
-        nearbyZoneIds: [],
-      };
-      zoneByName.set(zone.name, zone);
-      createdZones.push(zone);
+    const zoneNames = rawZoneCell
+      .split(/[;,|]+/)
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => s.length > 0);
+    if (zoneNames.length === 0) {
+      zoneNames.push(existingZones[0]?.name || 'NOUVELLE ZONE');
     }
+
+    const resolvedZoneIds: string[] = zoneNames.map((zName) => {
+      let zone = zoneByName.get(zName);
+      if (!zone) {
+        zone = {
+          id: `zone-${crypto.randomUUID()}`,
+          name: zName,
+          nearbyZoneIds: [],
+        };
+        zoneByName.set(zone.name, zone);
+        createdZones.push(zone);
+      }
+      return zone.id;
+    });
+
+    const primaryZoneId = resolvedZoneIds[0];
+    const coveredZoneIds = Array.from(
+      new Set(resolvedZoneIds.slice(1).filter((id) => id !== primaryZoneId))
+    );
 
     const expiryRaw =
       mapped.datevaliditeformation ??
@@ -360,7 +384,8 @@ export async function parseSpreadsheetFile(
       firstName: firstName || '—',
       internalNumber: normalizedNum,
       roles,
-      primaryZoneId: zone.id,
+      primaryZoneId,
+      coveredZoneIds,
       nearbyZoneIds: [],
       trainingExpiryDate,
       isActive,

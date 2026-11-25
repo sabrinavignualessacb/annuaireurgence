@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Check, MapPin, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { Person, Zone } from '../types';
+import { personCoversZone } from '../utils/posterLogic';
 
 interface ZoneManagerProps {
   zones: Zone[];
@@ -158,7 +159,7 @@ export const ZoneManager: React.FC<ZoneManagerProps> = ({
 
         <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-y-auto max-h-[460px]">
           {zones.map((zone) => {
-            const assignedCount = people.filter((p) => p.primaryZoneId === zone.id).length;
+            const assignedCount = people.filter((p) => personCoversZone(p, zone.id)).length;
             const isSelectedForConfig = configZone?.id === zone.id;
             const isActivePoster = activeZoneId === zone.id;
 
@@ -346,7 +347,7 @@ export const ZoneManager: React.FC<ZoneManagerProps> = ({
                   .filter((z) => z.id !== configZone.id)
                   .map((other) => {
                     const isNearby = configZone.nearbyZoneIds.includes(other.id);
-                    const otherCount = people.filter((p) => p.primaryZoneId === other.id).length;
+                    const otherCount = people.filter((p) => personCoversZone(p, other.id)).length;
 
                     return (
                       <label

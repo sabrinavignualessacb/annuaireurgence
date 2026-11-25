@@ -12,6 +12,7 @@ import {
   UserX,
 } from 'lucide-react';
 import { Person, ROLE_SHORT_LABELS, Zone } from '../types';
+import { getPersonCoveredZoneIds, personCoversZone } from '../utils/posterLogic';
 import {
   formatIsoToFrenchDate,
   getDaysUntilExpiry,
@@ -59,7 +60,7 @@ export const PersonnelManager: React.FC<PersonnelManagerProps> = ({
     const q = search.trim().toLowerCase();
     return people
       .filter((p) => {
-        if (zoneFilter !== 'all' && p.primaryZoneId !== zoneFilter) return false;
+        if (zoneFilter !== 'all' && !personCoversZone(p, zoneFilter)) return false;
         const eligible = isPersonEligibleForPoster(p);
         if (filterMode === 'eligible' && !eligible) return false;
         if (filterMode === 'excluded' && eligible) return false;
@@ -115,7 +116,7 @@ export const PersonnelManager: React.FC<PersonnelManagerProps> = ({
       {/* Barre de recherche et filtres */}
       <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative w-full sm:w-64">
+          <div className="relative w-full sm:w-60">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
@@ -129,7 +130,7 @@ export const PersonnelManager: React.FC<PersonnelManagerProps> = ({
           <select
             value={zoneFilter}
             onChange={(e) => setZoneFilter(e.target.value)}
-            className="px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-600/20"
+            className="px-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-600/20 max-w-full"
             aria-label="Filtrer par zone"
           >
             <option value="all">Toutes les zones</option>
@@ -141,8 +142,8 @@ export const PersonnelManager: React.FC<PersonnelManagerProps> = ({
           </select>
         </div>
 
-        {/* Contrôle segmenté des filtres */}
-        <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg overflow-x-auto">
+        {/* Contrôle segmenté des filtres (retour à la ligne propre sans scroll horizontal) */}
+        <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-lg">
           {(
             [
               { id: 'all', label: 'Tous' },
@@ -157,7 +158,7 @@ export const PersonnelManager: React.FC<PersonnelManagerProps> = ({
               key={tab.id}
               type="button"
               onClick={() => setFilterMode(tab.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 filterMode === tab.id
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
@@ -169,7 +170,7 @@ export const PersonnelManager: React.FC<PersonnelManagerProps> = ({
         </div>
       </div>
 
-      {/* Tableau haute densité */}
+      {/* Liste sans défilement horizontal */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         {filteredPeople.length === 0 ? (
           <div className="p-10 text-center">
@@ -181,17 +182,135 @@ export const PersonnelManager: React.FC<PersonnelManagerProps> = ({
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          <>
+            {/* Vue cartes pour petits écrans */}
+            <div className="md:hidden divide-y divide-slate-100">
+              {filteredPeople.map((person) => {
+                const status = getTrainingStatus(person.trainingExpiryDate);
+                const daysLeft = getDaysUntilExpiry(person.trainingExpiryDate);
+                const eligible = isPersonEligibleForPoster(person);
+                const coveredNames = getPersonCoveredZoneIds(person)
+                  .map((zid) => zonesById.get(zid)?.name)
+                  .filter((n): n is string => Boolean(n));
+
+                return (
+                  <div
+                    key={person.id}
+                    className={`p-4 space-y-2.5 ${!eligible ? 'bg-slate-50/60 text-slate-500' : ''}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-display font-bold text-sm text-slate-900 uppercase break-words">
+                          {person.lastName}{' '}
+                          <span className="font-semibold normal-case text-slate-700">
+                            {person.firstName}
+                          </span>
+                        </p>
+                        <p className="text-xs font-mono-num font-bold text-slate-700 mt-0.5">
+                          N° {person.internalNumber} ·{' '}
+                          <span className="font-sans font-medium">
+                            {person.roles.map((r) => ROLE_SHORT_LABELS[r]).join(' · ') || '—'}
+                          </span>
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => onToggleActive(person.id)}
+                          title={person.isActive ? 'Désactiver' : 'Réactiver'}
+                          className={`p-1.5 rounded-md cursor-pointer ${
+                            person.isActive
+                              ? 'text-slate-600 hover:bg-slate-100'
+                              : 'text-emerald-700 bg-emerald-50'
+                          }`}
+                        >
+                          {person.isActive ? (
+                            <UserX className="w-4 h-4" />
+                          ) : (
+                            <UserCheck className="w-4 h-4" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onEditPerson(person)}
+                          title="Modifier"
+                          className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-md cursor-pointer"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeletePerson(person.id)}
+                          title="Supprimer"
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      {coveredNames.map((zn, idx) => (
+                        <span
+                          key={zn}
+                          className={`px-2 py-0.5 rounded border text-[11px] font-semibold ${
+                            idx === 0
+                              ? 'bg-slate-100 border-slate-300 text-slate-800'
+                              : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                          }`}
+                        >
+                          {zn}
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="font-mono-num text-slate-600">
+                        Validité : {formatIsoToFrenchDate(person.trainingExpiryDate)}
+                        {status === 'expired' && (
+                          <span className="ml-1.5 text-red-700 font-semibold font-sans">
+                            (Expirée)
+                          </span>
+                        )}
+                        {status === 'expiring_soon' && daysLeft !== null && (
+                          <span className="ml-1.5 text-amber-700 font-semibold font-sans">
+                            (J-{daysLeft})
+                          </span>
+                        )}
+                      </span>
+                      <span
+                        className={`font-semibold ${
+                          eligible
+                            ? 'text-emerald-700'
+                            : !person.isActive
+                            ? 'text-slate-600'
+                            : 'text-red-700'
+                        }`}
+                      >
+                        {eligible
+                          ? 'Sur l’affiche'
+                          : !person.isActive
+                          ? 'Désactivé'
+                          : 'Masqué'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Tableau desktop responsive 100% largeur (aucun scroll horizontal) */}
+            <table className="hidden md:table w-full text-left border-collapse table-fixed">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/70 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                  <th className="py-3 px-4">Nom &amp; Prénom</th>
-                  <th className="py-3 px-4">N° Interne</th>
-                  <th className="py-3 px-4">Rôles</th>
-                  <th className="py-3 px-4">Zone principale</th>
-                  <th className="py-3 px-4">Validité formation</th>
-                  <th className="py-3 px-4">Statut affiche</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+                  <th className="py-3 px-3 w-[19%]">Nom &amp; Prénom</th>
+                  <th className="py-3 px-2.5 w-[11%]">N° Interne</th>
+                  <th className="py-3 px-2.5 w-[13%]">Rôles</th>
+                  <th className="py-3 px-2.5 w-[21%]">Zone(s) couverte(s)</th>
+                  <th className="py-3 px-2.5 w-[13%]">Validité</th>
+                  <th className="py-3 px-2.5 w-[12%]">Statut</th>
+                  <th className="py-3 px-3 w-[11%] text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
@@ -199,7 +318,9 @@ export const PersonnelManager: React.FC<PersonnelManagerProps> = ({
                   const status = getTrainingStatus(person.trainingExpiryDate);
                   const daysLeft = getDaysUntilExpiry(person.trainingExpiryDate);
                   const eligible = isPersonEligibleForPoster(person);
-                  const zoneName = zonesById.get(person.primaryZoneId)?.name || '—';
+                  const coveredNames = getPersonCoveredZoneIds(person)
+                    .map((zid) => zonesById.get(zid)?.name)
+                    .filter((n): n is string => Boolean(n));
 
                   return (
                     <tr
@@ -208,66 +329,83 @@ export const PersonnelManager: React.FC<PersonnelManagerProps> = ({
                         !eligible ? 'bg-slate-50/50 text-slate-500' : ''
                       }`}
                     >
-                      <td className="py-2.5 px-4 whitespace-nowrap">
+                      <td className="py-2.5 px-3 align-top break-words">
                         <span className="font-display font-bold uppercase text-slate-900">
                           {person.lastName}
                         </span>{' '}
                         <span className="text-slate-700">{person.firstName}</span>
                       </td>
 
-                      <td className="py-2.5 px-4 font-mono-num font-semibold text-slate-800 whitespace-nowrap">
+                      <td className="py-2.5 px-2.5 align-top font-mono-num text-xs font-semibold text-slate-800 break-words">
                         N° {person.internalNumber}
                       </td>
 
-                      <td className="py-2.5 px-4 whitespace-nowrap">
-                        <span className="text-xs font-medium text-slate-700">
+                      <td className="py-2.5 px-2.5 align-top">
+                        <span className="text-xs font-medium text-slate-700 break-words">
                           {person.roles.map((r) => ROLE_SHORT_LABELS[r]).join(' · ') || '—'}
                         </span>
                       </td>
 
-                      <td className="py-2.5 px-4 text-xs font-medium text-slate-700 whitespace-nowrap">
-                        {zoneName}
+                      <td className="py-2.5 px-2.5 align-top">
+                        <div className="flex flex-wrap gap-1">
+                          {coveredNames.length > 0 ? (
+                            coveredNames.map((zn, idx) => (
+                              <span
+                                key={zn}
+                                className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold leading-tight break-words ${
+                                  idx === 0
+                                    ? 'bg-slate-100 text-slate-800 border border-slate-200'
+                                    : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                }`}
+                              >
+                                {zn}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-xs text-slate-400">—</span>
+                          )}
+                        </div>
                       </td>
 
-                      <td className="py-2.5 px-4 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5 font-mono-num text-xs">
+                      <td className="py-2.5 px-2.5 align-top">
+                        <div className="flex flex-col gap-0.5 font-mono-num text-xs">
                           <span>{formatIsoToFrenchDate(person.trainingExpiryDate)}</span>
                           {status === 'expired' && (
-                            <span className="inline-flex items-center gap-1 text-red-700 font-semibold font-sans">
-                              <AlertTriangle className="w-3.5 h-3.5" />
+                            <span className="inline-flex items-center gap-1 text-red-700 font-semibold font-sans text-[11px]">
+                              <AlertTriangle className="w-3 h-3 shrink-0" />
                               Expirée
                             </span>
                           )}
                           {status === 'expiring_soon' && daysLeft !== null && (
-                            <span className="inline-flex items-center gap-1 text-amber-700 font-semibold font-sans">
-                              <Clock className="w-3.5 h-3.5" />
+                            <span className="inline-flex items-center gap-1 text-amber-700 font-semibold font-sans text-[11px]">
+                              <Clock className="w-3 h-3 shrink-0" />
                               J-{daysLeft}
                             </span>
                           )}
                         </div>
                       </td>
 
-                      <td className="py-2.5 px-4 whitespace-nowrap">
+                      <td className="py-2.5 px-2.5 align-top">
                         {eligible ? (
-                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Sur l&apos;affiche
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>Actif</span>
                           </span>
                         ) : !person.isActive ? (
-                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-                            <EyeOff className="w-3.5 h-3.5" />
-                            Désactivé
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600">
+                            <EyeOff className="w-3.5 h-3.5 shrink-0" />
+                            <span>Désactivé</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-700">
-                            <AlertTriangle className="w-3.5 h-3.5" />
-                            Masqué (formation expirée)
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-700">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            <span>Masqué</span>
                           </span>
                         )}
                       </td>
 
-                      <td className="py-2.5 px-4 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center justify-end gap-1">
+                      <td className="py-2.5 px-3 align-top text-right">
+                        <div className="inline-flex items-center justify-end gap-0.5">
                           <button
                             type="button"
                             onClick={() => onToggleActive(person.id)}
@@ -276,22 +414,16 @@ export const PersonnelManager: React.FC<PersonnelManagerProps> = ({
                                 ? 'Désactiver (retirer de l’affiche)'
                                 : 'Réactiver sur l’affiche'
                             }
-                            className={`px-2.5 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer ${
+                            className={`p-1.5 rounded-md transition-colors cursor-pointer ${
                               person.isActive
                                 ? 'text-slate-600 hover:bg-slate-200/70'
                                 : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
                             }`}
                           >
                             {person.isActive ? (
-                              <>
-                                <UserX className="w-3.5 h-3.5" />
-                                <span>Désactiver</span>
-                              </>
+                              <UserX className="w-4 h-4" />
                             ) : (
-                              <>
-                                <UserCheck className="w-3.5 h-3.5" />
-                                <span>Activer</span>
-                              </>
+                              <UserCheck className="w-4 h-4" />
                             )}
                           </button>
 
@@ -305,21 +437,21 @@ export const PersonnelManager: React.FC<PersonnelManagerProps> = ({
                           </button>
 
                           {confirmDeleteId === person.id ? (
-                            <div className="inline-flex items-center gap-1 ml-1">
+                            <div className="inline-flex items-center gap-1 ml-0.5">
                               <button
                                 type="button"
                                 onClick={() => {
                                   onDeletePerson(person.id);
                                   setConfirmDeleteId(null);
                                 }}
-                                className="px-2 py-1 text-xs font-semibold bg-red-600 text-white rounded hover:bg-red-700 cursor-pointer"
+                                className="px-1.5 py-0.5 text-[11px] font-semibold bg-red-600 text-white rounded hover:bg-red-700 cursor-pointer"
                               >
-                                Confirmer
+                                OK
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setConfirmDeleteId(null)}
-                                className="px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded cursor-pointer"
+                                className="px-1.5 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-100 rounded cursor-pointer"
                               >
                                 Non
                               </button>
@@ -341,7 +473,7 @@ export const PersonnelManager: React.FC<PersonnelManagerProps> = ({
                 })}
               </tbody>
             </table>
-          </div>
+          </>
         )}
       </div>
     </div>

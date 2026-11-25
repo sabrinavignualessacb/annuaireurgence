@@ -13,6 +13,7 @@ export interface Person {
   internalNumber: string;
   roles: EmergencyRole[];
   primaryZoneId: string;
+  coveredZoneIds?: string[]; // Zones supplémentaires couvertes directement
   nearbyZoneIds: string[];
   trainingExpiryDate: string; // YYYY-MM-DD
   isActive: boolean;

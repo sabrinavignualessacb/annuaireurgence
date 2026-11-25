@@ -185,6 +185,7 @@ service cloud.firestore {
           'internalNumber',
           'roles',
           'primaryZoneId',
+          'coveredZoneIds',
           'nearbyZoneIds',
           'trainingExpiryDate',
           'isActive',
@@ -200,6 +201,7 @@ service cloud.firestore {
         && data.roles is list && data.roles.size() >= 1 && data.roles.size() <= 4
         && data.roles.hasOnly(['SST', 'EPI', 'GUIDE', 'SERRE_FILE'])
         && data.primaryZoneId is string && data.primaryZoneId.size() >= 1 && data.primaryZoneId.size() <= 128
+        && (!('coveredZoneIds' in data) || isValidZoneIdList(data.coveredZoneIds))
         && isValidZoneIdList(data.nearbyZoneIds)
         && data.trainingExpiryDate is string && data.trainingExpiryDate.size() <= 10
         && (data.trainingExpiryDate == '' || data.trainingExpiryDate.matches('^\\d{4}-\\d{2}-\\d{2}$'))
@@ -350,6 +352,7 @@ service cloud.firestore {
               'internalNumber',
               'roles',
               'primaryZoneId',
+              'coveredZoneIds',
               'nearbyZoneIds',
               'trainingExpiryDate',
               'isActive',

@@ -194,12 +194,12 @@ export default function App() {
   useEffect(() => {
     const updateScale = () => {
       if (!stageRef.current) return;
-      const availableWidth = stageRef.current.clientWidth - 24;
-      const availableHeight = Math.max(window.innerHeight - 190, 420);
+      const availableWidth = Math.max(200, stageRef.current.clientWidth - 56);
+      const availableHeight = Math.max(window.innerHeight - 190, 360);
       const scaleW = availableWidth / 1188;
       const scaleH = availableHeight / 840;
       const next = Math.min(scaleW, scaleH, 1.05);
-      setFitScale(Math.max(0.32, Number(next.toFixed(3))));
+      setFitScale(Math.max(0.18, Number(next.toFixed(3))));
     };
 
     updateScale();
@@ -460,6 +460,7 @@ export default function App() {
     const nextPeople = prevSnapshot.people.map((p) => ({
       ...p,
       primaryZoneId: p.primaryZoneId === zoneId ? fallbackId : p.primaryZoneId,
+      coveredZoneIds: (p.coveredZoneIds || []).filter((id) => id !== zoneId),
       nearbyZoneIds: (p.nearbyZoneIds || []).filter((id) => id !== zoneId),
     }));
     const nextActiveZone =
@@ -487,6 +488,7 @@ export default function App() {
         if (
           origP &&
           (origP.primaryZoneId !== p.primaryZoneId ||
+            (origP.coveredZoneIds || []).length !== p.coveredZoneIds.length ||
             origP.nearbyZoneIds.length !== p.nearbyZoneIds.length)
         ) {
           void upsertPersonInFirestore(siteId, p, siteOwnerUid, sharedUids, false);
@@ -632,16 +634,16 @@ export default function App() {
   const effectiveScale = zoomMode === '100' ? 1 : fitScale;
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 overflow-x-hidden">
       {/* Barre supérieure (Contrat 3 zones, masquée à l'impression) */}
-      <header className="no-print bg-white border-b border-slate-200 px-6 h-16 flex items-center justify-between gap-8 sticky top-0 z-30">
+      <header className="no-print bg-white border-b border-slate-200 px-4 lg:px-6 min-h-16 flex flex-wrap md:flex-nowrap items-center justify-between gap-3 lg:gap-6 sticky top-0 z-30">
         {/* Zone 1 : Marque */}
-        <span className="font-display font-extrabold text-lg tracking-tight text-slate-900 whitespace-nowrap shrink-0">
+        <span className="font-display font-extrabold text-base lg:text-lg tracking-tight text-slate-900 whitespace-nowrap shrink-0">
           Annuaire d&apos;Urgence A3
         </span>
 
         {/* Zone 2 : Navigation principale */}
-        <nav className="flex items-center gap-6 overflow-x-auto">
+        <nav className="flex items-center gap-3 lg:gap-5 flex-wrap">
           {(
             [
               { id: 'poster', label: 'Aperçu A3' },
@@ -992,7 +994,9 @@ export default function App() {
               {/* Scène de prévisualisation et d'impression de l'affiche A3 */}
               <div
                 ref={stageRef}
-                className="print-stage flex-1 bg-slate-200/75 p-4 md:p-6 overflow-auto flex items-start justify-center"
+                className={`print-stage flex-1 bg-slate-200/75 p-4 md:p-6 flex items-start justify-center ${
+                  zoomMode === 'fit' ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto'
+                }`}
               >
                 <div
                   style={

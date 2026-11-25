@@ -188,6 +188,10 @@
           "minLength": 1,
           "maxLength": 128
         },
+        "coveredZoneIds": {
+          "type": "array",
+          "description": "Zones supplémentaires couvertes directement par cette personne."
+        },
         "nearbyZoneIds": {
           "type": "array",
           "description": "Zones proches supplémentaires pour cette personne."

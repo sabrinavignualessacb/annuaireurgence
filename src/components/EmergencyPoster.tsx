@@ -1,7 +1,7 @@
 import React from 'react';
 import { ImagePlus, PhoneCall } from 'lucide-react';
 import { CONFIDENTIALITY_NOTICE, Person, PosterSettings, Zone } from '../types';
-import { PosterColumnsData } from '../utils/posterLogic';
+import { getNearbyDisplayZoneName, PosterColumnsData } from '../utils/posterLogic';
 import {
   EpiPictogram,
   EvacuationPictogram,
@@ -211,55 +211,65 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
             </div>
 
             {/* Bloc 2 : PROCHE DE LA ZONE — Transparence intermédiaire */}
-            <div className="px-3 py-1.5 flex-shrink-0 opacity-65">
-              <div className="bg-[#D1FAE5]/70 text-[#065F46] border border-[#008749]/30 font-display font-bold text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded-sm mb-1">
+            <div className="px-3 py-1.5 flex-shrink-0">
+              <div
+                style={{ fontSize: `${zoneBannerFontSize}px` }}
+                className="text-[#008749] font-display font-extrabold uppercase tracking-wider text-center leading-tight py-0.5 mb-1"
+              >
                 PROCHE DE LA ZONE
               </div>
-              {columns.sstNearby.length > 0 ? (
-                <div>
-                  {columns.sstNearby.map((p) => (
-                    <PersonRow
-                      key={p.id}
-                      person={p}
-                      zoneLabel={zonesById.get(p.primaryZoneId)?.name}
-                      accentColor="green"
-                      tier="nearby"
-                    />
-                  ))}
-                </div>
-              ) : (
-                <EmptySectionNotice label="Aucun S.S.T à proximité" />
-              )}
+              <div className="opacity-65">
+                {columns.sstNearby.length > 0 ? (
+                  <div>
+                    {columns.sstNearby.map((p) => (
+                      <PersonRow
+                        key={p.id}
+                        person={p}
+                        zoneLabel={getNearbyDisplayZoneName(p, activeZone, zonesById)}
+                        accentColor="green"
+                        tier="nearby"
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptySectionNotice label="Aucun S.S.T à proximité" />
+                )}
+              </div>
             </div>
 
             {/* Bloc 3 : SITE — Plus grande transparence */}
-            <div className="px-3 py-1.5 flex-1 min-h-0 overflow-hidden opacity-45">
-              <div className="bg-slate-100 text-slate-600 border border-slate-300/80 font-display font-bold text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-sm mb-1">
+            <div className="px-3 py-1.5 flex-1 min-h-0 overflow-hidden">
+              <div
+                style={{ fontSize: `${zoneBannerFontSize}px` }}
+                className="text-slate-400 font-display font-extrabold uppercase tracking-wider text-center leading-tight py-0.5 mb-1"
+              >
                 SITE
               </div>
-              {columns.sstSite.length > 0 ? (
-                <div
-                  className={
-                    columns.sstSite.length > 6 ? 'grid grid-cols-2 gap-x-3' : 'flex flex-col'
-                  }
-                >
-                  {columns.sstSite.map((p) => (
-                    <PersonRow
-                      key={p.id}
-                      person={p}
-                      zoneLabel={
-                        columns.sstSite.length <= 6
-                          ? zonesById.get(p.primaryZoneId)?.name
-                          : undefined
-                      }
-                      accentColor="green"
-                      tier="site"
-                    />
-                  ))}
-                </div>
-              ) : (
-                <EmptySectionNotice label="Aucun autre S.S.T actif sur site" />
-              )}
+              <div className="opacity-45">
+                {columns.sstSite.length > 0 ? (
+                  <div
+                    className={
+                      columns.sstSite.length > 6 ? 'grid grid-cols-2 gap-x-3' : 'flex flex-col'
+                    }
+                  >
+                    {columns.sstSite.map((p) => (
+                      <PersonRow
+                        key={p.id}
+                        person={p}
+                        zoneLabel={
+                          columns.sstSite.length <= 6
+                            ? zonesById.get(p.primaryZoneId)?.name
+                            : undefined
+                        }
+                        accentColor="green"
+                        tier="site"
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptySectionNotice label="Aucun autre S.S.T actif sur site" />
+                )}
+              </div>
             </div>
           </div>
         </section>
@@ -313,25 +323,30 @@ export const EmergencyPoster: React.FC<EmergencyPosterProps> = ({
             </div>
 
             {/* Bloc 2 : PROCHE DE LA ZONE — Transparence intermédiaire */}
-            <div className="px-3 py-2 flex-1 min-h-0 overflow-hidden opacity-65">
-              <div className="bg-[#FEE2E2]/70 text-[#991B1B] border border-[#D91E18]/30 font-display font-bold text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded-sm mb-1.5">
+            <div className="px-3 py-2 flex-1 min-h-0 overflow-hidden">
+              <div
+                style={{ fontSize: `${zoneBannerFontSize}px` }}
+                className="text-[#D91E18] font-display font-extrabold uppercase tracking-wider text-center leading-tight py-0.5 mb-1.5"
+              >
                 PROCHE DE LA ZONE
               </div>
-              {columns.epiNearby.length > 0 ? (
-                <div>
-                  {columns.epiNearby.map((p) => (
-                    <PersonRow
-                      key={p.id}
-                      person={p}
-                      zoneLabel={zonesById.get(p.primaryZoneId)?.name}
-                      accentColor="red"
-                      tier="nearby"
-                    />
-                  ))}
-                </div>
-              ) : (
-                <EmptySectionNotice label="Aucun E.P.I à proximité" />
-              )}
+              <div className="opacity-65">
+                {columns.epiNearby.length > 0 ? (
+                  <div>
+                    {columns.epiNearby.map((p) => (
+                      <PersonRow
+                        key={p.id}
+                        person={p}
+                        zoneLabel={getNearbyDisplayZoneName(p, activeZone, zonesById)}
+                        accentColor="red"
+                        tier="nearby"
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptySectionNotice label="Aucun E.P.I à proximité" />
+                )}
+              </div>
             </div>
           </div>
         </section>
