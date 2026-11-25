@@ -21,6 +21,10 @@
           "type": "array",
           "description": "Liste bornée (max 10) des UID autorisés à accéder à ce site."
         },
+        "teamShared": {
+          "type": "boolean",
+          "description": "Active la lecture partagée pour tous les utilisateurs connectés (y compris anonymes sur SharePoint)."
+        },
         "companyName": {
           "type": "string",
           "maxLength": 120,
@@ -147,6 +151,10 @@
           "type": "array",
           "description": "Liste bornée (max 10) des UID autorisés."
         },
+        "teamShared": {
+          "type": "boolean",
+          "description": "Autorise la lecture par l'équipe sur le site partagé."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -213,6 +221,10 @@
         "sharedUids": {
           "type": "array",
           "description": "Liste bornée (max 10) des UID autorisés."
+        },
+        "teamShared": {
+          "type": "boolean",
+          "description": "Autorise la lecture par l'équipe sur le site partagé."
         },
         "createdAt": {
           "type": "string",
@@ -301,6 +313,23 @@
         }
       },
       "required": ["siteId", "createdByUid", "role", "active", "createdAt"]
+    },
+    "TeamPinConfig": {
+      "title": "TeamPinConfig",
+      "description": "Code PIN confidentiel permettant à l'équipe de déverrouiller l'édition sans compte Google.",
+      "type": "object",
+      "properties": {
+        "pin": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["pin", "updatedAt"]
     }
   },
   "firestore": {
@@ -319,6 +348,10 @@
     "/sites/{siteId}/members/{memberUid}": {
       "schema": { "$ref": "#/entities/SiteMember" },
       "description": "Membres collaborateurs ayant rejoint le site."
+    },
+    "/sites/{siteId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/TeamPinConfig" },
+      "description": "Paramètres confidentiels réservés au propriétaire/admin (ex. code PIN d'équipe)."
     },
     "/siteInvites/{inviteCode}": {
       "schema": { "$ref": "#/entities/SiteInvite" },

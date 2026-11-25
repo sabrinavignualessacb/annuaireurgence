@@ -1,11 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
+import {
+  onAuthStateChanged,
+  signInAnonymously,
+  signInWithPopup,
+  signOut,
+  User,
+} from 'firebase/auth';
 import {
   AlertTriangle,
   Cloud,
   CloudOff,
   Download,
   FileSpreadsheet,
+  Lock,
+  LockOpen,
   LogIn,
   Maximize2,
   Minimize2,
@@ -18,17 +26,21 @@ import { EmergencyPoster } from './components/EmergencyPoster';
 import { PersonModal } from './components/PersonModal';
 import { PersonnelManager } from './components/PersonnelManager';
 import { SettingsPanel } from './components/SettingsPanel';
+import { TeamPinModal } from './components/TeamPinModal';
 import { ZoneManager } from './components/ZoneManager';
 import { createDefaultAppData } from './data/defaultData';
 import { auth, googleProvider } from './firebase';
 import {
+  checkEditorAccessForUser,
   deletePersonInFirestore,
   deleteZoneInFirestore,
   joinSiteWithInviteCode,
+  lockTeamEditorSession,
   resolveOrInitializeUserSite,
   seedEntireSiteToFirestore,
   subscribeToSiteData,
   syncSharedUidsForSite,
+  unlockTeamEditorWithPin,
   updateSiteSettingsInFirestore,
   upsertPersonInFirestore,
   upsertZoneInFirestore,
@@ -80,6 +92,11 @@ export default function App() {
   const [siteId, setSiteId] = useState<string | null>(null);
   const [siteOwnerUid, setSiteOwnerUid] = useState<string | null>(null);
   const [sharedUids, setSharedUids] = useState<string[]>([]);
+  const [teamShared, setTeamShared] = useState(true);
+  const [canEditCloud, setCanEditCloud] = useState(false);
+  const [editorMemberName, setEditorMemberName] = useState<string | null>(null);
+  const [pinModalOpen, setPinModalOpen] = useState(false);
+  const [anonAuthDisabled, setAnonAuthDisabled] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'local' | 'connecting' | 'synced' | 'error'>('local');
   const [syncError, setSyncError] = useState<string | null>(null);
   const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(() => {
@@ -87,6 +104,7 @@ export default function App() {
     return params.get('invite');
   });
 
+  const autoAnonAttemptedRef = useRef(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const quickLogoInputRef = useRef<HTMLInputElement>(null);
   const quickJsonInputRef = useRef<HTMLInputElement>(null);
@@ -120,15 +138,37 @@ export default function App() {
         setSiteId(null);
         setSiteOwnerUid(null);
         setSharedUids([]);
+        setCanEditCloud(false);
+        setEditorMemberName(null);
         setSyncStatus('local');
+
+        if (!autoAnonAttemptedRef.current) {
+          autoAnonAttemptedRef.current = true;
+          try {
+            await signInAnonymously(auth);
+            return;
+          } catch (anonErr) {
+            const code =
+              anonErr && typeof anonErr === 'object' && 'code' in anonErr
+                ? String((anonErr as { code?: string }).code)
+                : '';
+            if (
+              code.includes('operation-not-allowed') ||
+              code.includes('admin-restricted-operation')
+            ) {
+              setAnonAuthDisabled(true);
+            }
+          }
+        }
         return;
       }
 
+      setAnonAuthDisabled(false);
       setSyncStatus('connecting');
       try {
         let preferredSiteId = localStorage.getItem(PREFERRED_SITE_KEY);
 
-        if (pendingInviteCode) {
+        if (pendingInviteCode && !nextUser.isAnonymous) {
           try {
             preferredSiteId = await joinSiteWithInviteCode(pendingInviteCode, nextUser);
             localStorage.setItem(PREFERRED_SITE_KEY, preferredSiteId);
@@ -151,25 +191,54 @@ export default function App() {
 
         if (cancelled) return;
 
+        if (!resolved) {
+          setSiteId(null);
+          setSiteOwnerUid(null);
+          setSharedUids([]);
+          setCanEditCloud(false);
+          setEditorMemberName(null);
+          setSyncStatus('local');
+          return;
+        }
+
         setSiteId(resolved.siteId);
         setSiteOwnerUid(resolved.ownerUid);
         setSharedUids(resolved.sharedUids);
+        setTeamShared(resolved.teamShared);
         localStorage.setItem(PREFERRED_SITE_KEY, resolved.siteId);
 
-        unsubFirestore = subscribeToSiteData(resolved.siteId, nextUser, (partial) => {
-          if (partial.ownerUid !== undefined) setSiteOwnerUid(partial.ownerUid);
-          if (partial.sharedUids !== undefined) setSharedUids(partial.sharedUids);
+        const editorStatus = await checkEditorAccessForUser(
+          resolved.siteId,
+          nextUser,
+          resolved.ownerUid
+        );
+        if (cancelled) return;
+        setCanEditCloud(editorStatus.canEdit);
+        setEditorMemberName(editorStatus.memberName);
 
-          setData((prev) => ({
-            zones: partial.zones !== undefined && partial.zones.length > 0 ? partial.zones : prev.zones,
-            people: partial.people !== undefined ? partial.people : prev.people,
-            activeZoneId:
-              partial.activeZoneId !== undefined && partial.activeZoneId !== ''
-                ? partial.activeZoneId
-                : prev.activeZoneId,
-            settings: partial.settings !== undefined ? partial.settings : prev.settings,
-          }));
-        });
+        unsubFirestore = subscribeToSiteData(
+          resolved.siteId,
+          nextUser,
+          resolved.teamShared,
+          (partial) => {
+            if (partial.ownerUid !== undefined) setSiteOwnerUid(partial.ownerUid);
+            if (partial.sharedUids !== undefined) setSharedUids(partial.sharedUids);
+            if (partial.teamShared !== undefined) setTeamShared(partial.teamShared);
+
+            setData((prev) => ({
+              zones:
+                partial.zones !== undefined && partial.zones.length > 0
+                  ? partial.zones
+                  : prev.zones,
+              people: partial.people !== undefined ? partial.people : prev.people,
+              activeZoneId:
+                partial.activeZoneId !== undefined && partial.activeZoneId !== ''
+                  ? partial.activeZoneId
+                  : prev.activeZoneId,
+              settings: partial.settings !== undefined ? partial.settings : prev.settings,
+            }));
+          }
+        );
 
         setSyncStatus('synced');
       } catch (err) {
@@ -241,14 +310,33 @@ export default function App() {
 
   const isCloudReady = Boolean(user && siteId && siteOwnerUid && syncStatus === 'synced');
 
+  const handlePermissionDenied = () => {
+    setCanEditCloud(false);
+    setSidebarToast('Code PIN requis ou expiré pour modifier en ligne.');
+    setPinModalOpen(true);
+  };
+
+  const requireEditAccess = (): boolean => {
+    if (isCloudReady && !canEditCloud) {
+      setPinModalOpen(true);
+      return false;
+    }
+    return true;
+  };
+
   const withAutoDate = (prev: AppData): PosterSettings =>
     prev.settings.autoUpdateDate
       ? { ...prev.settings, lastUpdatedDate: getTodayFrenchDate() }
       : prev.settings;
 
   const syncSettingsToCloud = (nextSettings: PosterSettings, nextActiveZoneId: string) => {
-    if (isCloudReady && siteId) {
-      void updateSiteSettingsInFirestore(siteId, nextSettings, nextActiveZoneId);
+    if (isCloudReady && canEditCloud && siteId) {
+      void updateSiteSettingsInFirestore(
+        siteId,
+        nextSettings,
+        nextActiveZoneId,
+        handlePermissionDenied
+      );
     }
   };
 
@@ -257,7 +345,7 @@ export default function App() {
     setSyncError(null);
     try {
       await signInWithPopup(auth, googleProvider);
-      setSidebarToast('Connecté à Firebase.');
+      setSidebarToast('Connecté en Admin Google.');
     } catch (err) {
       setSyncError(
         err instanceof Error ? err.message : 'Échec de la connexion Google.'
@@ -266,8 +354,27 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    autoAnonAttemptedRef.current = false;
     await signOut(auth);
-    setSidebarToast('Déconnecté (mode local).');
+    setSidebarToast('Déconnecté.');
+  };
+
+  const handleUnlockWithPin = async (pin: string, displayName: string) => {
+    if (!user || !siteId || !siteOwnerUid) {
+      throw new Error('Connexion au serveur en cours, réessayez dans un instant.');
+    }
+    await unlockTeamEditorWithPin(siteId, siteOwnerUid, user, pin, displayName);
+    setCanEditCloud(true);
+    setEditorMemberName(displayName);
+    setSidebarToast('Mode Édition déverrouillé pour cette session.');
+  };
+
+  const handleLockEditor = async () => {
+    if (!user || !siteId) return;
+    await lockTeamEditorSession(siteId, user);
+    setCanEditCloud(false);
+    setEditorMemberName(null);
+    setSidebarToast('Mode Édition verrouillé (lecture seule).');
   };
 
   const handlePushLocalToCloud = async () => {
@@ -276,7 +383,8 @@ export default function App() {
       siteId,
       siteOwnerUid,
       sharedUids.length > 0 ? sharedUids : [siteOwnerUid],
-      dataRef.current
+      dataRef.current,
+      teamShared
     );
   };
 
@@ -287,9 +395,19 @@ export default function App() {
     setPendingInviteCode(null);
     // Re-résoudre la connexion vers le site rejoint
     const resolved = await resolveOrInitializeUserSite(user, dataRef.current, joinedSiteId);
-    setSiteId(resolved.siteId);
-    setSiteOwnerUid(resolved.ownerUid);
-    setSharedUids(resolved.sharedUids);
+    if (resolved) {
+      setSiteId(resolved.siteId);
+      setSiteOwnerUid(resolved.ownerUid);
+      setSharedUids(resolved.sharedUids);
+      setTeamShared(resolved.teamShared);
+      const editorStatus = await checkEditorAccessForUser(
+        resolved.siteId,
+        user,
+        resolved.ownerUid
+      );
+      setCanEditCloud(editorStatus.canEdit);
+      setEditorMemberName(editorStatus.memberName);
+    }
   };
 
   const handleSyncMembersAccess = async (memberUids: string[]) => {
@@ -299,6 +417,7 @@ export default function App() {
 
   // Handlers Personnel
   const handleSavePerson = (personData: Omit<Person, 'id'>, existingId?: string) => {
+    if (!requireEditAccess()) return;
     const newId = existingId || `p-${crypto.randomUUID()}`;
     const savedPerson: Person = { ...personData, id: newId };
     const nextSettings = withAutoDate(dataRef.current);
@@ -314,8 +433,16 @@ export default function App() {
       };
     });
 
-    if (isCloudReady && siteId && siteOwnerUid) {
-      void upsertPersonInFirestore(siteId, savedPerson, siteOwnerUid, sharedUids, !existingId);
+    if (isCloudReady && canEditCloud && siteId && siteOwnerUid) {
+      void upsertPersonInFirestore(
+        siteId,
+        savedPerson,
+        siteOwnerUid,
+        sharedUids,
+        !existingId,
+        teamShared,
+        handlePermissionDenied
+      );
       if (dataRef.current.settings.autoUpdateDate) {
         syncSettingsToCloud(nextSettings, dataRef.current.activeZoneId);
       }
@@ -323,6 +450,7 @@ export default function App() {
   };
 
   const handleTogglePersonActive = (personId: string) => {
+    if (!requireEditAccess()) return;
     const target = dataRef.current.people.find((p) => p.id === personId);
     if (!target) return;
     const updated: Person = { ...target, isActive: !target.isActive };
@@ -334,8 +462,16 @@ export default function App() {
       settings: withAutoDate(prev),
     }));
 
-    if (isCloudReady && siteId && siteOwnerUid) {
-      void upsertPersonInFirestore(siteId, updated, siteOwnerUid, sharedUids, false);
+    if (isCloudReady && canEditCloud && siteId && siteOwnerUid) {
+      void upsertPersonInFirestore(
+        siteId,
+        updated,
+        siteOwnerUid,
+        sharedUids,
+        false,
+        teamShared,
+        handlePermissionDenied
+      );
       if (dataRef.current.settings.autoUpdateDate) {
         syncSettingsToCloud(nextSettings, dataRef.current.activeZoneId);
       }
@@ -343,6 +479,7 @@ export default function App() {
   };
 
   const handleDeletePerson = (personId: string) => {
+    if (!requireEditAccess()) return;
     const nextSettings = withAutoDate(dataRef.current);
     setData((prev) => ({
       ...prev,
@@ -350,8 +487,8 @@ export default function App() {
       settings: withAutoDate(prev),
     }));
 
-    if (isCloudReady && siteId) {
-      void deletePersonInFirestore(siteId, personId);
+    if (isCloudReady && canEditCloud && siteId) {
+      void deletePersonInFirestore(siteId, personId, handlePermissionDenied);
       if (dataRef.current.settings.autoUpdateDate) {
         syncSettingsToCloud(nextSettings, dataRef.current.activeZoneId);
       }
@@ -373,6 +510,7 @@ export default function App() {
       setSidebarToast(`Zone "${clean}" sélectionnée.`);
       return;
     }
+    if (!requireEditAccess()) return;
     const newId = `zone-${crypto.randomUUID()}`;
     const newZone: Zone = { id: newId, name: clean, nearbyZoneIds: [] };
     const nextSettings = withAutoDate(dataRef.current);
@@ -385,13 +523,22 @@ export default function App() {
     }));
     setSidebarToast(`Zone "${clean}" créée.`);
 
-    if (isCloudReady && siteId && siteOwnerUid) {
-      void upsertZoneInFirestore(siteId, newZone, siteOwnerUid, sharedUids, true);
+    if (isCloudReady && canEditCloud && siteId && siteOwnerUid) {
+      void upsertZoneInFirestore(
+        siteId,
+        newZone,
+        siteOwnerUid,
+        sharedUids,
+        true,
+        teamShared,
+        handlePermissionDenied
+      );
       syncSettingsToCloud(nextSettings, newId);
     }
   };
 
   const handleCreateMultipleZones = (names: string[]): number => {
+    if (!requireEditAccess()) return 0;
     const existingNames = new Set(data.zones.map((z) => z.name.trim().toUpperCase()));
     const toAdd: Zone[] = [];
     names.forEach((raw) => {
@@ -415,9 +562,17 @@ export default function App() {
     }));
     setSidebarToast(`${toAdd.length} zone(s) créée(s).`);
 
-    if (isCloudReady && siteId && siteOwnerUid) {
+    if (isCloudReady && canEditCloud && siteId && siteOwnerUid) {
       toAdd.forEach((z) => {
-        void upsertZoneInFirestore(siteId, z, siteOwnerUid, sharedUids, true);
+        void upsertZoneInFirestore(
+          siteId,
+          z,
+          siteOwnerUid,
+          sharedUids,
+          true,
+          teamShared,
+          handlePermissionDenied
+        );
       });
       if (dataRef.current.settings.autoUpdateDate) {
         syncSettingsToCloud(nextSettings, dataRef.current.activeZoneId);
@@ -427,6 +582,7 @@ export default function App() {
   };
 
   const handleRenameZone = (zoneId: string, newName: string) => {
+    if (!requireEditAccess()) return;
     const clean = newName.trim().toUpperCase();
     const target = dataRef.current.zones.find((z) => z.id === zoneId);
     if (!target || !clean) return;
@@ -439,8 +595,16 @@ export default function App() {
       settings: withAutoDate(prev),
     }));
 
-    if (isCloudReady && siteId && siteOwnerUid) {
-      void upsertZoneInFirestore(siteId, updated, siteOwnerUid, sharedUids, false);
+    if (isCloudReady && canEditCloud && siteId && siteOwnerUid) {
+      void upsertZoneInFirestore(
+        siteId,
+        updated,
+        siteOwnerUid,
+        sharedUids,
+        false,
+        teamShared,
+        handlePermissionDenied
+      );
       if (dataRef.current.settings.autoUpdateDate) {
         syncSettingsToCloud(nextSettings, dataRef.current.activeZoneId);
       }
@@ -449,6 +613,7 @@ export default function App() {
 
   const handleDeleteZone = (zoneId: string) => {
     if (dataRef.current.zones.length <= 1) return;
+    if (!requireEditAccess()) return;
     const prevSnapshot = dataRef.current;
     const remaining = prevSnapshot.zones
       .filter((z) => z.id !== zoneId)
@@ -474,14 +639,21 @@ export default function App() {
       settings: nextSettings,
     });
 
-    if (isCloudReady && siteId && siteOwnerUid) {
-      void deleteZoneInFirestore(siteId, zoneId);
-      remaining.forEach((z, idx) => {
+    if (isCloudReady && canEditCloud && siteId && siteOwnerUid) {
+      void deleteZoneInFirestore(siteId, zoneId, handlePermissionDenied);
+      remaining.forEach((z) => {
         const orig = prevSnapshot.zones.find((oz) => oz.id === z.id);
         if (orig && orig.nearbyZoneIds.length !== z.nearbyZoneIds.length) {
-          void upsertZoneInFirestore(siteId, z, siteOwnerUid, sharedUids, false);
+          void upsertZoneInFirestore(
+            siteId,
+            z,
+            siteOwnerUid,
+            sharedUids,
+            false,
+            teamShared,
+            handlePermissionDenied
+          );
         }
-        void idx;
       });
       nextPeople.forEach((p) => {
         const origP = prevSnapshot.people.find((op) => op.id === p.id);
@@ -491,7 +663,15 @@ export default function App() {
             (origP.coveredZoneIds || []).length !== p.coveredZoneIds.length ||
             origP.nearbyZoneIds.length !== p.nearbyZoneIds.length)
         ) {
-          void upsertPersonInFirestore(siteId, p, siteOwnerUid, sharedUids, false);
+          void upsertPersonInFirestore(
+            siteId,
+            p,
+            siteOwnerUid,
+            sharedUids,
+            false,
+            teamShared,
+            handlePermissionDenied
+          );
         }
       });
       syncSettingsToCloud(nextSettings, nextActiveZone);
@@ -503,6 +683,7 @@ export default function App() {
     nearbyZoneId: string,
     bidirectional: boolean
   ) => {
+    if (!requireEditAccess()) return;
     const prevSnapshot = dataRef.current;
     const targetZone = prevSnapshot.zones.find((z) => z.id === zoneId);
     if (!targetZone) return;
@@ -540,9 +721,17 @@ export default function App() {
       settings: withAutoDate(prev),
     }));
 
-    if (isCloudReady && siteId && siteOwnerUid) {
+    if (isCloudReady && canEditCloud && siteId && siteOwnerUid) {
       changedZones.forEach((z) => {
-        void upsertZoneInFirestore(siteId, z, siteOwnerUid, sharedUids, false);
+        void upsertZoneInFirestore(
+          siteId,
+          z,
+          siteOwnerUid,
+          sharedUids,
+          false,
+          teamShared,
+          handlePermissionDenied
+        );
       });
       if (prevSnapshot.settings.autoUpdateDate) {
         syncSettingsToCloud(nextSettings, prevSnapshot.activeZoneId);
@@ -552,6 +741,7 @@ export default function App() {
 
   // Handlers Settings & Import/Export
   const handleUpdateSettings = (partial: Partial<PosterSettings>) => {
+    if (!requireEditAccess()) return;
     const nextSettings = { ...dataRef.current.settings, ...partial };
     setData((prev) => ({
       ...prev,
@@ -561,16 +751,20 @@ export default function App() {
   };
 
   const handleImportJsonFile = async (file: File) => {
+    if (!requireEditAccess()) return;
     const text = await file.text();
     const parsed = validateAndParseJsonImport(text);
     setData(parsed);
     setSidebarToast('Sauvegarde JSON importée.');
-    if (isCloudReady && siteId && siteOwnerUid) {
-      await seedEntireSiteToFirestore(siteId, siteOwnerUid, sharedUids, parsed);
+    if (isCloudReady && canEditCloud && siteId && siteOwnerUid) {
+      await seedEntireSiteToFirestore(siteId, siteOwnerUid, sharedUids, parsed, teamShared);
     }
   };
 
   const handleImportSpreadsheetFile = async (file: File) => {
+    if (!requireEditAccess()) {
+      return { added: 0, zonesCreated: 0, skipped: 0, warnings: ['Déverrouillez l’édition avec le code PIN.'] };
+    }
     const res = await parseSpreadsheetFile(file, data.zones);
     const nextSettings = withAutoDate(dataRef.current);
     setData((prev) => ({
@@ -581,12 +775,28 @@ export default function App() {
     }));
     setSidebarToast(`${res.newPeople.length} fiche(s) importée(s).`);
 
-    if (isCloudReady && siteId && siteOwnerUid) {
+    if (isCloudReady && canEditCloud && siteId && siteOwnerUid) {
       res.createdZones.forEach((z) => {
-        void upsertZoneInFirestore(siteId, z, siteOwnerUid, sharedUids, true);
+        void upsertZoneInFirestore(
+          siteId,
+          z,
+          siteOwnerUid,
+          sharedUids,
+          true,
+          teamShared,
+          handlePermissionDenied
+        );
       });
       res.newPeople.forEach((p) => {
-        void upsertPersonInFirestore(siteId, p, siteOwnerUid, sharedUids, true);
+        void upsertPersonInFirestore(
+          siteId,
+          p,
+          siteOwnerUid,
+          sharedUids,
+          true,
+          teamShared,
+          handlePermissionDenied
+        );
       });
       if (dataRef.current.settings.autoUpdateDate) {
         syncSettingsToCloud(nextSettings, dataRef.current.activeZoneId);
@@ -602,10 +812,11 @@ export default function App() {
   };
 
   const handleResetDemoData = () => {
+    if (!requireEditAccess()) return;
     const fresh = createDefaultAppData();
     setData(fresh);
-    if (isCloudReady && siteId && siteOwnerUid) {
-      void seedEntireSiteToFirestore(siteId, siteOwnerUid, sharedUids, fresh);
+    if (isCloudReady && canEditCloud && siteId && siteOwnerUid) {
+      void seedEntireSiteToFirestore(siteId, siteOwnerUid, sharedUids, fresh, teamShared);
     }
   };
 
@@ -806,6 +1017,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
+                    if (!requireEditAccess()) return;
                     setEditingPerson(null);
                     setPersonModalOpen(true);
                   }}
@@ -850,7 +1062,7 @@ export default function App() {
 
             {/* Sauvegarde Firebase & Statut */}
             <div className="border-t border-slate-100 pt-3 space-y-2.5">
-              {user ? (
+              {user && !user.isAnonymous ? (
                 <button
                   type="button"
                   onClick={() => setActiveTab('settings')}
@@ -860,7 +1072,7 @@ export default function App() {
                     <Cloud className="w-4 h-4 shrink-0" />
                     <span>
                       {syncStatus === 'synced'
-                        ? 'Firebase synchronisé'
+                        ? 'Admin Cloud synchronisé'
                         : syncStatus === 'connecting'
                         ? 'Connexion Firebase...'
                         : 'Erreur sync Firebase'}
@@ -870,6 +1082,42 @@ export default function App() {
                     {user.email}
                   </p>
                 </button>
+              ) : user?.isAnonymous && syncStatus === 'synced' ? (
+                <div className="space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      canEditCloud ? setActiveTab('settings') : setPinModalOpen(true)
+                    }
+                    className={`w-full p-2.5 rounded-lg border text-left transition-colors cursor-pointer ${
+                      canEditCloud
+                        ? 'border-emerald-200 bg-emerald-50/70 hover:bg-emerald-50'
+                        : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div
+                      className={`flex items-center gap-2 text-xs font-semibold ${
+                        canEditCloud ? 'text-emerald-800' : 'text-slate-800'
+                      }`}
+                    >
+                      {canEditCloud ? (
+                        <LockOpen className="w-4 h-4 shrink-0 text-emerald-700" />
+                      ) : (
+                        <Lock className="w-4 h-4 shrink-0 text-slate-500" />
+                      )}
+                      <span>
+                        {canEditCloud
+                          ? 'Édition équipe active'
+                          : 'Lecture seule · Déverrouiller'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                      {canEditCloud
+                        ? editorMemberName || 'Code PIN validé'
+                        : 'Cliquez pour saisir le code PIN'}
+                    </p>
+                  </button>
+                </div>
               ) : (
                 <button
                   type="button"
@@ -878,15 +1126,15 @@ export default function App() {
                   className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer"
                 >
                   <LogIn className="w-3.5 h-3.5" />
-                  <span>Sauvegarder sur Firebase</span>
+                  <span>Connexion Admin Google</span>
                 </button>
               )}
 
               <div className="text-[11px] text-slate-400 leading-relaxed flex items-center gap-1.5">
-                {!user && <CloudOff className="w-3.5 h-3.5 shrink-0" />}
+                {syncStatus !== 'synced' && <CloudOff className="w-3.5 h-3.5 shrink-0" />}
                 <span>
-                  {user
-                    ? 'Cloud temps réel + cache local · A3 paysage.'
+                  {syncStatus === 'synced'
+                    ? 'Base temps réel · A3 paysage.'
                     : 'Mode local uniquement · A3 paysage.'}
                 </span>
               </div>
@@ -933,7 +1181,30 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {isCloudReady && user?.isAnonymous && (
+                    canEditCloud ? (
+                      <button
+                        type="button"
+                        onClick={handleLockEditor}
+                        title="Verrouiller le mode édition"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100/70 transition-colors cursor-pointer"
+                      >
+                        <LockOpen className="w-3.5 h-3.5" />
+                        <span>Édition active</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setPinModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
+                      >
+                        <Lock className="w-3.5 h-3.5 text-[#D91E18]" />
+                        <span>Modifier (Code PIN)</span>
+                      </button>
+                    )
+                  )}
+
                   <div className="flex items-center gap-1 p-0.5 bg-slate-100 rounded-lg">
                     <button
                       type="button"
@@ -980,6 +1251,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
+                      if (!requireEditAccess()) return;
                       setEditingPerson(null);
                       setPersonModalOpen(true);
                     }}
@@ -1025,7 +1297,10 @@ export default function App() {
                       columns={posterColumns}
                       zonesById={zonesById}
                       settings={data.settings}
-                      onRequestLogoUpload={() => quickLogoInputRef.current?.click()}
+                      onRequestLogoUpload={() => {
+                        if (!requireEditAccess()) return;
+                        quickLogoInputRef.current?.click();
+                      }}
                     />
                   </div>
                 </div>
@@ -1040,10 +1315,12 @@ export default function App() {
                 zones={data.zones}
                 zonesById={zonesById}
                 onAddPerson={() => {
+                  if (!requireEditAccess()) return;
                   setEditingPerson(null);
                   setPersonModalOpen(true);
                 }}
                 onEditPerson={(person) => {
+                  if (!requireEditAccess()) return;
                   setEditingPerson(person);
                   setPersonModalOpen(true);
                 }}
@@ -1089,10 +1366,15 @@ export default function App() {
                     siteId={siteId}
                     siteOwnerUid={siteOwnerUid}
                     sharedUids={sharedUids}
+                    canEditCloud={canEditCloud}
+                    editorMemberName={editorMemberName}
+                    anonAuthDisabled={anonAuthDisabled}
                     syncStatus={syncStatus}
                     syncError={syncError}
                     onSignIn={handleSignIn}
                     onSignOut={handleSignOut}
+                    onOpenPinModal={() => setPinModalOpen(true)}
+                    onLockEditor={handleLockEditor}
                     onPushLocalToCloud={handlePushLocalToCloud}
                     onJoinWithCode={handleJoinWithCode}
                     onSyncMembersAccess={handleSyncMembersAccess}
@@ -1158,6 +1440,13 @@ export default function App() {
           setEditingPerson(null);
         }}
         onSave={handleSavePerson}
+      />
+
+      {/* Modale de déverrouillage Équipe SharePoint (Code PIN) */}
+      <TeamPinModal
+        isOpen={pinModalOpen}
+        onClose={() => setPinModalOpen(false)}
+        onUnlock={handleUnlockWithPin}
       />
     </div>
   );

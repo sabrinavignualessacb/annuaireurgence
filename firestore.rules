@@ -54,6 +54,18 @@ service cloud.firestore {
       return /databases/$(database)/documents/sites/$(siteId)/members/$(uid);
     }
 
+    function teamPinPath(siteId) {
+      return /databases/$(database)/documents/sites/$(siteId)/private/teamPin;
+    }
+
+    function isValidTeamPinEntry(siteId, code) {
+      return code is string
+        && code.size() >= 4
+        && code.size() <= 32
+        && exists(teamPinPath(siteId))
+        && get(teamPinPath(siteId)).data.pin == code;
+    }
+
     function isSiteOwner(siteId) {
       return isVerified()
         && exists(/databases/$(database)/documents/sites/$(siteId))
@@ -61,19 +73,40 @@ service cloud.firestore {
     }
 
     function isSiteMember(siteId) {
-      return isVerified() && exists(memberPath(siteId, request.auth.uid));
+      return isSignedIn() && exists(memberPath(siteId, request.auth.uid));
+    }
+
+    function isMemberEditorValid(siteId) {
+      return isSiteMember(siteId)
+        && get(memberPath(siteId, request.auth.uid)).data.role == 'editor'
+        && (
+          isValidTeamPinEntry(siteId, get(memberPath(siteId, request.auth.uid)).data.inviteCode)
+          || (
+            isVerified()
+            && exists(/databases/$(database)/documents/siteInvites/$(get(memberPath(siteId, request.auth.uid)).data.inviteCode))
+            && get(/databases/$(database)/documents/siteInvites/$(get(memberPath(siteId, request.auth.uid)).data.inviteCode)).data.active == true
+            && get(/databases/$(database)/documents/siteInvites/$(get(memberPath(siteId, request.auth.uid)).data.inviteCode)).data.siteId == siteId
+            && get(/databases/$(database)/documents/siteInvites/$(get(memberPath(siteId, request.auth.uid)).data.inviteCode)).data.role == 'editor'
+          )
+        );
     }
 
     function isSiteEditor(siteId) {
       return isBootstrappedAdmin()
         || isSiteOwner(siteId)
-        || (isSiteMember(siteId) && get(memberPath(siteId, request.auth.uid)).data.role == 'editor');
+        || isMemberEditorValid(siteId);
     }
 
     function isSiteReader(siteId) {
       return isBootstrappedAdmin()
         || isSiteOwner(siteId)
-        || isSiteMember(siteId);
+        || isSiteMember(siteId)
+        || (
+          isSignedIn()
+          && exists(/databases/$(database)/documents/sites/$(siteId))
+          && 'teamShared' in siteDoc(siteId)
+          && siteDoc(siteId).teamShared == true
+        );
     }
 
     // 3. Schémas de validation (Anti-Update-Gap)
@@ -97,6 +130,7 @@ service cloud.firestore {
           'name',
           'ownerUid',
           'sharedUids',
+          'teamShared',
           'companyName',
           'companyLogoDataUrl',
           'companyLogoSizePx',
@@ -119,6 +153,7 @@ service cloud.firestore {
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
         && data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128
         && isValidSharedUids(data.sharedUids)
+        && (!('teamShared' in data) || data.teamShared is bool)
         && data.companyName is string && data.companyName.size() <= 120
         && data.companyLogoDataUrl is string && data.companyLogoDataUrl.size() <= 400000
         && (!('companyLogoSizePx' in data) || (data.companyLogoSizePx is number && data.companyLogoSizePx >= 24 && data.companyLogoSizePx <= 96))
@@ -153,6 +188,7 @@ service cloud.firestore {
           'nearbyZoneIds',
           'ownerUid',
           'sharedUids',
+          'teamShared',
           'createdAt',
           'updatedAt'
         ])
@@ -160,6 +196,7 @@ service cloud.firestore {
         && isValidZoneIdList(data.nearbyZoneIds)
         && data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128
         && isValidSharedUids(data.sharedUids)
+        && (!('teamShared' in data) || data.teamShared is bool)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -191,6 +228,7 @@ service cloud.firestore {
           'isActive',
           'ownerUid',
           'sharedUids',
+          'teamShared',
           'createdAt',
           'updatedAt'
         ])
@@ -208,6 +246,7 @@ service cloud.firestore {
         && data.isActive is bool
         && data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128
         && isValidSharedUids(data.sharedUids)
+        && (!('teamShared' in data) || data.teamShared is bool)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -233,13 +272,21 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    function isValidTeamPin(data) {
+      return data.keys().hasAll(['pin', 'updatedAt'])
+        && data.keys().hasOnly(['pin', 'updatedAt'])
+        && data.pin is string && data.pin.size() >= 4 && data.pin.size() <= 32
+        && data.updatedAt is timestamp;
+    }
+
     // 4. Règles des collections
     match /sites/{siteId} {
       allow get: if isValidId(siteId) && isSiteReader(siteId);
-      allow list: if isVerified() && (
+      allow list: if isSignedIn() && (
         isBootstrappedAdmin()
         || existing().ownerUid == request.auth.uid
         || request.auth.uid in existing().sharedUids
+        || ('teamShared' in existing() && existing().teamShared == true)
       );
       allow create: if isVerified()
         && isValidId(siteId)
@@ -247,7 +294,7 @@ service cloud.firestore {
         && (incoming().ownerUid == request.auth.uid || isBootstrappedAdmin())
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
-      allow update: if isVerified()
+      allow update: if isSignedIn()
         && isValidId(siteId)
         && isValidSiteConfig(incoming())
         && isSiteEditor(siteId)
@@ -278,7 +325,7 @@ service cloud.firestore {
           ])
           // Action 2 : Gestion des accès partagés (propriétaire ou admin uniquement)
           || ((existing().ownerUid == request.auth.uid || isBootstrappedAdmin())
-              && incoming().diff(existing()).affectedKeys().hasOnly(['sharedUids', 'updatedAt']))
+              && incoming().diff(existing()).affectedKeys().hasOnly(['sharedUids', 'teamShared', 'updatedAt']))
         );
       allow delete: if isVerified()
         && isValidId(siteId)
@@ -287,21 +334,23 @@ service cloud.firestore {
       // Sous-collection Zones
       match /zones/{zoneId} {
         allow get: if isValidId(siteId) && isValidId(zoneId) && isSiteReader(siteId);
-        allow list: if isVerified() && (
+        allow list: if isSignedIn() && (
           isBootstrappedAdmin()
           || existing().ownerUid == request.auth.uid
           || request.auth.uid in existing().sharedUids
+          || ('teamShared' in existing() && existing().teamShared == true)
         );
-        allow create: if isVerified()
+        allow create: if isSignedIn()
           && isValidId(siteId)
           && isValidId(zoneId)
           && isValidZone(incoming())
           && exists(/databases/$(database)/documents/sites/$(siteId))
           && isSiteEditor(siteId)
           && incoming().ownerUid == siteDoc(siteId).ownerUid
+          && (!('teamShared' in incoming()) || ('teamShared' in siteDoc(siteId) && incoming().teamShared == siteDoc(siteId).teamShared))
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time;
-        allow update: if isVerified()
+        allow update: if isSignedIn()
           && isValidId(siteId)
           && isValidId(zoneId)
           && isValidZone(incoming())
@@ -312,9 +361,9 @@ service cloud.firestore {
           && (
             incoming().diff(existing()).affectedKeys().hasOnly(['name', 'nearbyZoneIds', 'updatedAt'])
             || ((siteDoc(siteId).ownerUid == request.auth.uid || isBootstrappedAdmin())
-                && incoming().diff(existing()).affectedKeys().hasOnly(['sharedUids', 'updatedAt']))
+                && incoming().diff(existing()).affectedKeys().hasOnly(['sharedUids', 'teamShared', 'updatedAt']))
           );
-        allow delete: if isVerified()
+        allow delete: if isSignedIn()
           && isValidId(siteId)
           && isValidId(zoneId)
           && isSiteEditor(siteId);
@@ -323,21 +372,23 @@ service cloud.firestore {
       // Sous-collection Personnel
       match /people/{personId} {
         allow get: if isValidId(siteId) && isValidId(personId) && isSiteReader(siteId);
-        allow list: if isVerified() && (
+        allow list: if isSignedIn() && (
           isBootstrappedAdmin()
           || existing().ownerUid == request.auth.uid
           || request.auth.uid in existing().sharedUids
+          || ('teamShared' in existing() && existing().teamShared == true)
         );
-        allow create: if isVerified()
+        allow create: if isSignedIn()
           && isValidId(siteId)
           && isValidId(personId)
           && isValidPerson(incoming())
           && exists(/databases/$(database)/documents/sites/$(siteId))
           && isSiteEditor(siteId)
           && incoming().ownerUid == siteDoc(siteId).ownerUid
+          && (!('teamShared' in incoming()) || ('teamShared' in siteDoc(siteId) && incoming().teamShared == siteDoc(siteId).teamShared))
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time;
-        allow update: if isVerified()
+        allow update: if isSignedIn()
           && isValidId(siteId)
           && isValidId(personId)
           && isValidPerson(incoming())
@@ -359,25 +410,47 @@ service cloud.firestore {
               'updatedAt'
             ])
             || ((siteDoc(siteId).ownerUid == request.auth.uid || isBootstrappedAdmin())
-                && incoming().diff(existing()).affectedKeys().hasOnly(['sharedUids', 'updatedAt']))
+                && incoming().diff(existing()).affectedKeys().hasOnly(['sharedUids', 'teamShared', 'updatedAt']))
           );
-        allow delete: if isVerified()
+        allow delete: if isSignedIn()
           && isValidId(siteId)
           && isValidId(personId)
           && isSiteEditor(siteId);
+      }
+
+      // Sous-collection Paramètres privés (Code PIN d'équipe)
+      match /private/{docId} {
+        allow get: if isValidId(siteId)
+          && isValidId(docId)
+          && (isSiteOwner(siteId) || isBootstrappedAdmin());
+        allow list: if false;
+        allow create: if isValidId(siteId)
+          && docId == 'teamPin'
+          && isValidTeamPin(incoming())
+          && (isSiteOwner(siteId) || isBootstrappedAdmin())
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(siteId)
+          && docId == 'teamPin'
+          && isValidTeamPin(incoming())
+          && (isSiteOwner(siteId) || isBootstrappedAdmin())
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['pin', 'updatedAt']);
+        allow delete: if isValidId(siteId)
+          && isValidId(docId)
+          && (isSiteOwner(siteId) || isBootstrappedAdmin());
       }
 
       // Sous-collection Membres du site
       match /members/{memberUid} {
         allow get: if isValidId(siteId)
           && isValidId(memberUid)
-          && isVerified()
+          && isSignedIn()
           && (memberUid == request.auth.uid || isSiteOwner(siteId) || isBootstrappedAdmin());
         allow list: if isVerified() && (
           isBootstrappedAdmin()
           || existing().siteOwnerUid == request.auth.uid
         );
-        allow create: if isVerified()
+        allow create: if isSignedIn()
           && isValidId(siteId)
           && isValidId(memberUid)
           && isValidSiteMember(incoming())
@@ -386,21 +459,40 @@ service cloud.firestore {
           && incoming().joinedAt == request.time
           && exists(/databases/$(database)/documents/sites/$(siteId))
           && incoming().siteOwnerUid == siteDoc(siteId).ownerUid
-          && exists(/databases/$(database)/documents/siteInvites/$(incoming().inviteCode))
-          && get(/databases/$(database)/documents/siteInvites/$(incoming().inviteCode)).data.active == true
-          && get(/databases/$(database)/documents/siteInvites/$(incoming().inviteCode)).data.siteId == siteId
-          && get(/databases/$(database)/documents/siteInvites/$(incoming().inviteCode)).data.role == incoming().role;
-        allow update: if isVerified()
+          && (
+            (
+              incoming().role == 'editor'
+              && isValidTeamPinEntry(siteId, incoming().inviteCode)
+            )
+            || (
+              isVerified()
+              && exists(/databases/$(database)/documents/siteInvites/$(incoming().inviteCode))
+              && get(/databases/$(database)/documents/siteInvites/$(incoming().inviteCode)).data.active == true
+              && get(/databases/$(database)/documents/siteInvites/$(incoming().inviteCode)).data.siteId == siteId
+              && get(/databases/$(database)/documents/siteInvites/$(incoming().inviteCode)).data.role == incoming().role
+            )
+          );
+        allow update: if isSignedIn()
           && isValidId(siteId)
           && isValidId(memberUid)
           && isValidSiteMember(incoming())
-          && (isSiteOwner(siteId) || isBootstrappedAdmin())
           && incoming().uid == existing().uid
           && incoming().siteOwnerUid == existing().siteOwnerUid
-          && incoming().inviteCode == existing().inviteCode
           && incoming().joinedAt == existing().joinedAt
-          && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'displayName']);
-        allow delete: if isVerified()
+          && (
+            (
+              (isSiteOwner(siteId) || isBootstrappedAdmin())
+              && incoming().inviteCode == existing().inviteCode
+              && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'displayName'])
+            )
+            || (
+              memberUid == request.auth.uid
+              && incoming().role == 'editor'
+              && isValidTeamPinEntry(siteId, incoming().inviteCode)
+              && incoming().diff(existing()).affectedKeys().hasOnly(['inviteCode', 'displayName', 'role'])
+            )
+          );
+        allow delete: if isSignedIn()
           && isValidId(siteId)
           && isValidId(memberUid)
           && (memberUid == request.auth.uid || isSiteOwner(siteId) || isBootstrappedAdmin());

@@ -27,6 +27,7 @@ import { getTodayFrenchDate, normalizeInternalNumber } from '../utils/validation
 
 export const BOOTSTRAPPED_ADMIN_EMAIL = 'service.qse.33450@gmail.com';
 export const DEFAULT_ADMIN_SITE_ID = 'site-principal';
+export const DEFAULT_TEAM_PIN = '2025';
 
 export interface SiteMemberRecord {
   uid: string;
@@ -43,6 +44,21 @@ export interface SiteInviteRecord {
   active: boolean;
 }
 
+export interface ResolvedSiteInfo {
+  siteId: string;
+  ownerUid: string;
+  sharedUids: string[];
+  teamShared: boolean;
+}
+
+export function isAdminUser(user: User | null): boolean {
+  if (!user) return false;
+  return (
+    Boolean(user.emailVerified) &&
+    user.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()
+  );
+}
+
 function sanitizeId(raw: string): string {
   const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 120);
   return cleaned || `id-${crypto.randomUUID()}`;
@@ -53,7 +69,8 @@ function buildSitePayload(
   ownerUid: string,
   sharedUids: string[],
   data: AppData,
-  isCreate: boolean
+  isCreate: boolean,
+  teamShared = true
 ) {
   const logo = (data.settings.companyLogoDataUrl || '').slice(0, 399000);
   const validShape: EmergencyBoxShape = ['pills', 'stacked', 'rounded', 'chamfer'].includes(
@@ -88,6 +105,7 @@ function buildSitePayload(
     return {
       ...base,
       ownerUid,
+      teamShared,
       createdAt: serverTimestamp(),
     };
   }
@@ -98,7 +116,8 @@ function buildZonePayload(
   zone: Zone,
   ownerUid: string,
   sharedUids: string[],
-  isCreate: boolean
+  isCreate: boolean,
+  teamShared = true
 ) {
   const base = {
     name: (zone.name || 'ZONE').trim().toUpperCase().slice(0, 120),
@@ -110,6 +129,7 @@ function buildZonePayload(
       ...base,
       ownerUid,
       sharedUids: Array.from(new Set(sharedUids)).slice(0, 10),
+      teamShared,
       createdAt: serverTimestamp(),
     };
   }
@@ -120,7 +140,8 @@ function buildPersonPayload(
   person: Person,
   ownerUid: string,
   sharedUids: string[],
-  isCreate: boolean
+  isCreate: boolean,
+  teamShared = true
 ) {
   const validRoles = (person.roles || []).filter((r): r is EmergencyRole =>
     ['SST', 'EPI', 'GUIDE', 'SERRE_FILE'].includes(r)
@@ -150,6 +171,7 @@ function buildPersonPayload(
       ...base,
       ownerUid,
       sharedUids: Array.from(new Set(sharedUids)).slice(0, 10),
+      teamShared,
       createdAt: serverTimestamp(),
     };
   }
@@ -157,17 +179,65 @@ function buildPersonPayload(
 }
 
 /**
- * Résout l'identifiant du site Firestore pour l'utilisateur connecté,
- * ou initialise un site avec les données locales s'il n'en possède pas encore.
+ * Pour l'administrateur ou propriétaire : garantit que `teamShared: true` est appliqué
+ * sur le site et ses sous-collections et initialise le code PIN d'équipe si absent.
+ */
+export async function ensureTeamSharedAndDefaultPin(siteId: string): Promise<void> {
+  try {
+    const siteRef = doc(db, 'sites', siteId);
+    const siteSnap = await getDoc(siteRef);
+    if (!siteSnap.exists()) return;
+
+    const zonesSnap = await getDocs(collection(db, 'sites', siteId, 'zones'));
+    const peopleSnap = await getDocs(collection(db, 'sites', siteId, 'people'));
+
+    const batch = writeBatch(db);
+    let hasChanges = false;
+
+    if (siteSnap.data().teamShared !== true) {
+      batch.update(siteRef, { teamShared: true, updatedAt: serverTimestamp() });
+      hasChanges = true;
+    }
+    zonesSnap.forEach((z) => {
+      if (z.data().teamShared !== true) {
+        batch.update(z.ref, { teamShared: true, updatedAt: serverTimestamp() });
+        hasChanges = true;
+      }
+    });
+    peopleSnap.forEach((p) => {
+      if (p.data().teamShared !== true) {
+        batch.update(p.ref, { teamShared: true, updatedAt: serverTimestamp() });
+        hasChanges = true;
+      }
+    });
+
+    if (hasChanges) {
+      await batch.commit();
+    }
+
+    const pinRef = doc(db, 'sites', siteId, 'private', 'teamPin');
+    const pinSnap = await getDoc(pinRef);
+    if (!pinSnap.exists()) {
+      await setDoc(pinRef, {
+        pin: DEFAULT_TEAM_PIN,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch {
+    // Non-blocking setup helper
+  }
+}
+
+/**
+ * Résout l'identifiant du site Firestore pour l'utilisateur connecté
+ * (Admin Google, collègue avec code, ou visiteur SharePoint en session anonyme).
  */
 export async function resolveOrInitializeUserSite(
   user: User,
   localFallbackData: AppData,
   preferredSiteId?: string | null
-): Promise<{ siteId: string; ownerUid: string; sharedUids: string[] }> {
-  const isAdmin =
-    Boolean(user.emailVerified) &&
-    user.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+): Promise<ResolvedSiteInfo | null> {
+  const isAdmin = isAdminUser(user);
 
   // 1. Si un site préféré est fourni et accessible
   if (preferredSiteId && /^[a-zA-Z0-9_-]+$/.test(preferredSiteId)) {
@@ -177,11 +247,16 @@ export async function resolveOrInitializeUserSite(
       if (snap.exists()) {
         const d = snap.data();
         const shared = Array.isArray(d.sharedUids) ? d.sharedUids.map(String) : [];
-        if (isAdmin || d.ownerUid === user.uid || shared.includes(user.uid)) {
+        const isTeamShared = d.teamShared === true;
+        if (isAdmin || d.ownerUid === user.uid || shared.includes(user.uid) || isTeamShared) {
+          if (isAdmin || d.ownerUid === user.uid) {
+            await ensureTeamSharedAndDefaultPin(snap.id);
+          }
           return {
             siteId: snap.id,
             ownerUid: String(d.ownerUid),
             sharedUids: shared,
+            teamShared: isTeamShared || isAdmin || d.ownerUid === user.uid,
           };
         }
       }
@@ -190,56 +265,78 @@ export async function resolveOrInitializeUserSite(
     }
   }
 
-  // 2. Pour l'administrateur QSE, vérifier d'abord 'site-principal'
-  if (isAdmin) {
-    const principalRef = doc(db, 'sites', DEFAULT_ADMIN_SITE_ID);
-    try {
-      const snap = await getDoc(principalRef);
-      if (snap.exists()) {
-        const d = snap.data();
+  // 2. Vérifier 'site-principal' (accessible à l'admin et à toute l'équipe si teamShared == true)
+  const principalRef = doc(db, 'sites', DEFAULT_ADMIN_SITE_ID);
+  try {
+    const snap = await getDoc(principalRef);
+    if (snap.exists()) {
+      const d = snap.data();
+      const shared = Array.isArray(d.sharedUids) ? d.sharedUids.map(String) : [];
+      const isTeamShared = d.teamShared === true;
+      if (isAdmin || d.ownerUid === user.uid || shared.includes(user.uid) || isTeamShared) {
+        if (isAdmin || d.ownerUid === user.uid) {
+          await ensureTeamSharedAndDefaultPin(snap.id);
+        }
         return {
           siteId: snap.id,
           ownerUid: String(d.ownerUid),
-          sharedUids: Array.isArray(d.sharedUids) ? d.sharedUids.map(String) : [user.uid],
+          sharedUids: shared,
+          teamShared: isTeamShared || isAdmin || d.ownerUid === user.uid,
         };
       }
-    } catch (error) {
+    }
+  } catch (error) {
+    if (isAdmin) {
       handleFirestoreError(error, OperationType.GET, `sites/${DEFAULT_ADMIN_SITE_ID}`);
     }
   }
 
-  // 3. Rechercher un site existant dont l'utilisateur est propriétaire ou co-éditeur
-  try {
-    const q = query(
-      collection(db, 'sites'),
-      where('sharedUids', 'array-contains', user.uid)
-    );
-    const listSnap = await getDocs(q);
-    if (!listSnap.empty) {
-      const first = listSnap.docs[0];
-      const d = first.data();
-      return {
-        siteId: first.id,
-        ownerUid: String(d.ownerUid),
-        sharedUids: Array.isArray(d.sharedUids) ? d.sharedUids.map(String) : [user.uid],
-      };
+  // 3. Pour les comptes Google vérifiés : rechercher un site où l'utilisateur est dans sharedUids
+  if (!user.isAnonymous) {
+    try {
+      const q = query(
+        collection(db, 'sites'),
+        where('sharedUids', 'array-contains', user.uid)
+      );
+      const listSnap = await getDocs(q);
+      if (!listSnap.empty) {
+        const first = listSnap.docs[0];
+        const d = first.data();
+        const isTeamShared = d.teamShared === true;
+        if (d.ownerUid === user.uid) {
+          await ensureTeamSharedAndDefaultPin(first.id);
+        }
+        return {
+          siteId: first.id,
+          ownerUid: String(d.ownerUid),
+          sharedUids: Array.isArray(d.sharedUids) ? d.sharedUids.map(String) : [user.uid],
+          teamShared: isTeamShared || d.ownerUid === user.uid,
+        };
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, 'sites');
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, 'sites');
   }
 
-  // 4. Aucun site trouvé : créer le site et importer les données locales en batch
+  // 4. Si visiteur anonyme (SharePoint) et que le site principal n'est pas encore initialisé
+  if (user.isAnonymous) {
+    return null;
+  }
+
+  // 5. Aucun site trouvé pour un compte Google vérifié : initialiser le site avec les données locales
   const newSiteId = isAdmin
     ? DEFAULT_ADMIN_SITE_ID
     : sanitizeId(`site-${user.uid.slice(0, 16)}`);
   const sharedUids = [user.uid];
 
-  await seedEntireSiteToFirestore(newSiteId, user.uid, sharedUids, localFallbackData);
+  await seedEntireSiteToFirestore(newSiteId, user.uid, sharedUids, localFallbackData, true);
+  await ensureTeamSharedAndDefaultPin(newSiteId);
 
   return {
     siteId: newSiteId,
     ownerUid: user.uid,
     sharedUids,
+    teamShared: true,
   };
 }
 
@@ -247,11 +344,11 @@ export async function seedEntireSiteToFirestore(
   siteId: string,
   ownerUid: string,
   sharedUids: string[],
-  data: AppData
+  data: AppData,
+  teamShared = true
 ): Promise<void> {
   const siteRef = doc(db, 'sites', siteId);
   try {
-    // Nettoyer d'abord les anciennes sous-collections si le site existe déjà
     const existingZones = await getDocs(collection(db, 'sites', siteId, 'zones'));
     const existingPeople = await getDocs(collection(db, 'sites', siteId, 'people'));
 
@@ -261,19 +358,32 @@ export async function seedEntireSiteToFirestore(
 
     batch.set(
       siteRef,
-      buildSitePayload(data.settings.companyName || 'Site Principal', ownerUid, sharedUids, data, true)
+      buildSitePayload(
+        data.settings.companyName || 'Site Principal',
+        ownerUid,
+        sharedUids,
+        data,
+        true,
+        teamShared
+      )
     );
 
     data.zones.forEach((zone) => {
       const zId = sanitizeId(zone.id);
       const zRef = doc(db, 'sites', siteId, 'zones', zId);
-      batch.set(zRef, buildZonePayload({ ...zone, id: zId }, ownerUid, sharedUids, true));
+      batch.set(
+        zRef,
+        buildZonePayload({ ...zone, id: zId }, ownerUid, sharedUids, true, teamShared)
+      );
     });
 
     data.people.forEach((person) => {
       const pId = sanitizeId(person.id);
       const pRef = doc(db, 'sites', siteId, 'people', pId);
-      batch.set(pRef, buildPersonPayload({ ...person, id: pId }, ownerUid, sharedUids, true));
+      batch.set(
+        pRef,
+        buildPersonPayload({ ...person, id: pId }, ownerUid, sharedUids, true, teamShared)
+      );
     });
 
     await batch.commit();
@@ -285,6 +395,7 @@ export async function seedEntireSiteToFirestore(
 export function subscribeToSiteData(
   siteId: string,
   user: User,
+  teamShared: boolean,
   onUpdate: (partial: {
     settings?: PosterSettings;
     activeZoneId?: string;
@@ -292,11 +403,10 @@ export function subscribeToSiteData(
     people?: Person[];
     ownerUid?: string;
     sharedUids?: string[];
+    teamShared?: boolean;
   }) => void
 ): () => void {
-  const isAdmin =
-    Boolean(user.emailVerified) &&
-    user.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+  const isAdmin = isAdminUser(user);
 
   const sitePath = `sites/${siteId}`;
   const zonesPath = `sites/${siteId}/zones`;
@@ -310,6 +420,7 @@ export function subscribeToSiteData(
       onUpdate({
         ownerUid: String(d.ownerUid || ''),
         sharedUids: Array.isArray(d.sharedUids) ? d.sharedUids.map(String) : [],
+        teamShared: d.teamShared === true,
         activeZoneId: String(d.activeZoneId || ''),
         settings: {
           companyLogoDataUrl: d.companyLogoDataUrl ? String(d.companyLogoDataUrl) : null,
@@ -339,6 +450,8 @@ export function subscribeToSiteData(
 
   const zonesQuery = isAdmin
     ? collection(db, 'sites', siteId, 'zones')
+    : teamShared
+    ? query(collection(db, 'sites', siteId, 'zones'), where('teamShared', '==', true))
     : query(collection(db, 'sites', siteId, 'zones'), where('sharedUids', 'array-contains', user.uid));
 
   const unsubZones = onSnapshot(
@@ -360,6 +473,8 @@ export function subscribeToSiteData(
 
   const peopleQuery = isAdmin
     ? collection(db, 'sites', siteId, 'people')
+    : teamShared
+    ? query(collection(db, 'sites', siteId, 'people'), where('teamShared', '==', true))
     : query(
         collection(db, 'sites', siteId, 'people'),
         where('sharedUids', 'array-contains', user.uid)
@@ -395,10 +510,111 @@ export function subscribeToSiteData(
   };
 }
 
+export async function checkEditorAccessForUser(
+  siteId: string,
+  user: User,
+  siteOwnerUid: string
+): Promise<{ canEdit: boolean; memberName: string | null }> {
+  if (isAdminUser(user) || (!user.isAnonymous && user.emailVerified && user.uid === siteOwnerUid)) {
+    return { canEdit: true, memberName: user.displayName || user.email || 'Admin QSE' };
+  }
+
+  try {
+    const memberSnap = await getDoc(doc(db, 'sites', siteId, 'members', user.uid));
+    if (!memberSnap.exists()) {
+      return { canEdit: false, memberName: null };
+    }
+    const data = memberSnap.data();
+    return {
+      canEdit: data.role === 'editor',
+      memberName: String(data.displayName || 'Équipe QSE'),
+    };
+  } catch {
+    return { canEdit: false, memberName: null };
+  }
+}
+
+export async function unlockTeamEditorWithPin(
+  siteId: string,
+  siteOwnerUid: string,
+  user: User,
+  pinRaw: string,
+  displayNameRaw: string
+): Promise<void> {
+  const pin = pinRaw.trim();
+  if (pin.length < 4 || pin.length > 32) {
+    throw new Error('Le code PIN doit contenir entre 4 et 32 caractères.');
+  }
+  const displayName = (displayNameRaw || user.displayName || 'Équipe QSE').trim().slice(0, 120);
+  const memberRef = doc(db, 'sites', siteId, 'members', user.uid);
+
+  try {
+    const existing = await getDoc(memberRef);
+    if (existing.exists()) {
+      await updateDoc(memberRef, {
+        inviteCode: pin,
+        displayName,
+        role: 'editor',
+      });
+    } else {
+      await setDoc(memberRef, {
+        uid: user.uid,
+        siteOwnerUid,
+        displayName,
+        role: 'editor',
+        inviteCode: pin,
+        joinedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message.toLowerCase() : '';
+    if (msg.includes('permission') || msg.includes('insufficient')) {
+      throw new Error('Code PIN incorrect.');
+    }
+    handleFirestoreError(error, OperationType.WRITE, `sites/${siteId}/members/${user.uid}`);
+  }
+}
+
+export async function lockTeamEditorSession(siteId: string, user: User): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'sites', siteId, 'members', user.uid));
+  } catch {
+    // Ignore if already absent
+  }
+}
+
+export async function getTeamPinForAdmin(siteId: string): Promise<string> {
+  try {
+    const snap = await getDoc(doc(db, 'sites', siteId, 'private', 'teamPin'));
+    if (!snap.exists()) return DEFAULT_TEAM_PIN;
+    return String(snap.data().pin || DEFAULT_TEAM_PIN);
+  } catch {
+    return DEFAULT_TEAM_PIN;
+  }
+}
+
+export async function setTeamPinForAdmin(siteId: string, newPinRaw: string): Promise<string> {
+  const pin = newPinRaw.trim();
+  if (pin.length < 4 || pin.length > 32) {
+    throw new Error('Le code PIN doit contenir entre 4 et 32 caractères.');
+  }
+  const path = `sites/${siteId}/private/teamPin`;
+  try {
+    await setDoc(doc(db, 'sites', siteId, 'private', 'teamPin'), {
+      pin,
+      updatedAt: serverTimestamp(),
+    });
+    return pin;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
 export async function updateSiteSettingsInFirestore(
   siteId: string,
   settings: PosterSettings,
-  activeZoneId: string
+  activeZoneId: string,
+  onPermissionDenied?: () => void
 ): Promise<void> {
   const path = `sites/${siteId}`;
   try {
@@ -423,6 +639,11 @@ export async function updateSiteSettingsInFirestore(
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
+    const msg = error instanceof Error ? error.message.toLowerCase() : '';
+    if (onPermissionDenied && (msg.includes('permission') || msg.includes('insufficient'))) {
+      onPermissionDenied();
+      return;
+    }
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
@@ -432,7 +653,9 @@ export async function upsertZoneInFirestore(
   zone: Zone,
   ownerUid: string,
   sharedUids: string[],
-  isNew: boolean
+  isNew: boolean,
+  teamShared = true,
+  onPermissionDenied?: () => void
 ): Promise<void> {
   const zId = sanitizeId(zone.id);
   const path = `sites/${siteId}/zones/${zId}`;
@@ -440,25 +663,39 @@ export async function upsertZoneInFirestore(
     if (isNew) {
       await setDoc(
         doc(db, 'sites', siteId, 'zones', zId),
-        buildZonePayload({ ...zone, id: zId }, ownerUid, sharedUids, true)
+        buildZonePayload({ ...zone, id: zId }, ownerUid, sharedUids, true, teamShared)
       );
     } else {
       await updateDoc(
         doc(db, 'sites', siteId, 'zones', zId),
-        buildZonePayload({ ...zone, id: zId }, ownerUid, sharedUids, false)
+        buildZonePayload({ ...zone, id: zId }, ownerUid, sharedUids, false, teamShared)
       );
     }
   } catch (error) {
+    const msg = error instanceof Error ? error.message.toLowerCase() : '';
+    if (onPermissionDenied && (msg.includes('permission') || msg.includes('insufficient'))) {
+      onPermissionDenied();
+      return;
+    }
     handleFirestoreError(error, isNew ? OperationType.CREATE : OperationType.UPDATE, path);
   }
 }
 
-export async function deleteZoneInFirestore(siteId: string, zoneId: string): Promise<void> {
+export async function deleteZoneInFirestore(
+  siteId: string,
+  zoneId: string,
+  onPermissionDenied?: () => void
+): Promise<void> {
   const zId = sanitizeId(zoneId);
   const path = `sites/${siteId}/zones/${zId}`;
   try {
     await deleteDoc(doc(db, 'sites', siteId, 'zones', zId));
   } catch (error) {
+    const msg = error instanceof Error ? error.message.toLowerCase() : '';
+    if (onPermissionDenied && (msg.includes('permission') || msg.includes('insufficient'))) {
+      onPermissionDenied();
+      return;
+    }
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
@@ -468,7 +705,9 @@ export async function upsertPersonInFirestore(
   person: Person,
   ownerUid: string,
   sharedUids: string[],
-  isNew: boolean
+  isNew: boolean,
+  teamShared = true,
+  onPermissionDenied?: () => void
 ): Promise<void> {
   const pId = sanitizeId(person.id);
   const path = `sites/${siteId}/people/${pId}`;
@@ -476,25 +715,39 @@ export async function upsertPersonInFirestore(
     if (isNew) {
       await setDoc(
         doc(db, 'sites', siteId, 'people', pId),
-        buildPersonPayload({ ...person, id: pId }, ownerUid, sharedUids, true)
+        buildPersonPayload({ ...person, id: pId }, ownerUid, sharedUids, true, teamShared)
       );
     } else {
       await updateDoc(
         doc(db, 'sites', siteId, 'people', pId),
-        buildPersonPayload({ ...person, id: pId }, ownerUid, sharedUids, false)
+        buildPersonPayload({ ...person, id: pId }, ownerUid, sharedUids, false, teamShared)
       );
     }
   } catch (error) {
+    const msg = error instanceof Error ? error.message.toLowerCase() : '';
+    if (onPermissionDenied && (msg.includes('permission') || msg.includes('insufficient'))) {
+      onPermissionDenied();
+      return;
+    }
     handleFirestoreError(error, isNew ? OperationType.CREATE : OperationType.UPDATE, path);
   }
 }
 
-export async function deletePersonInFirestore(siteId: string, personId: string): Promise<void> {
+export async function deletePersonInFirestore(
+  siteId: string,
+  personId: string,
+  onPermissionDenied?: () => void
+): Promise<void> {
   const pId = sanitizeId(personId);
   const path = `sites/${siteId}/people/${pId}`;
   try {
     await deleteDoc(doc(db, 'sites', siteId, 'people', pId));
   } catch (error) {
+    const msg = error instanceof Error ? error.message.toLowerCase() : '';
+    if (onPermissionDenied && (msg.includes('permission') || msg.includes('insufficient'))) {
+      onPermissionDenied();
+      return;
+    }
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
@@ -525,9 +778,7 @@ export async function listSiteInvites(
   siteId: string,
   user: User
 ): Promise<SiteInviteRecord[]> {
-  const isAdmin =
-    Boolean(user.emailVerified) &&
-    user.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+  const isAdmin = isAdminUser(user);
   try {
     const q = isAdmin
       ? query(collection(db, 'siteInvites'), where('siteId', '==', siteId))
@@ -612,7 +863,7 @@ export async function joinSiteWithInviteCode(
 
 /**
  * Ajoute les UID des membres du site dans `sharedUids` (site, zones et personnel)
- * pour leur donner l'accès temps réel en lecture/écriture.
+ * et active `teamShared: true`.
  */
 export async function syncSharedUidsForSite(
   siteId: string,
@@ -627,13 +878,14 @@ export async function syncSharedUidsForSite(
     const batch = writeBatch(db);
     batch.update(doc(db, 'sites', siteId), {
       sharedUids: nextShared,
+      teamShared: true,
       updatedAt: serverTimestamp(),
     });
     zonesSnap.forEach((z) => {
-      batch.update(z.ref, { sharedUids: nextShared, updatedAt: serverTimestamp() });
+      batch.update(z.ref, { sharedUids: nextShared, teamShared: true, updatedAt: serverTimestamp() });
     });
     peopleSnap.forEach((p) => {
-      batch.update(p.ref, { sharedUids: nextShared, updatedAt: serverTimestamp() });
+      batch.update(p.ref, { sharedUids: nextShared, teamShared: true, updatedAt: serverTimestamp() });
     });
     await batch.commit();
   } catch (error) {
