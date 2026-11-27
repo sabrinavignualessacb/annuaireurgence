@@ -21,6 +21,7 @@ import {
   Plus,
   Printer,
   Upload,
+  X,
 } from 'lucide-react';
 import { CloudSyncCard } from './components/CloudSyncCard';
 import { EmergencyPoster } from './components/EmergencyPoster';
@@ -36,6 +37,7 @@ import {
   checkEditorAccessForUser,
   deletePersonInFirestore,
   deleteZoneInFirestore,
+  isAdminUser,
   joinSiteWithInviteCode,
   lockTeamEditorSession,
   resolveOrInitializeUserSite,
@@ -108,6 +110,7 @@ export default function App() {
   });
 
   const autoAnonAttemptedRef = useRef(false);
+  const sessionPinVerifiedRef = useRef(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const quickLogoInputRef = useRef<HTMLInputElement>(null);
   const quickJsonInputRef = useRef<HTMLInputElement>(null);
@@ -314,6 +317,20 @@ export default function App() {
   const isCloudReady = Boolean(user && siteId && siteOwnerUid && syncStatus === 'synced');
 
   const handlePermissionDenied = () => {
+    const isVerifiedOwnerOrAdmin = Boolean(
+      user &&
+        (isAdminUser(user) ||
+          (!user.isAnonymous && user.emailVerified && user.uid === siteOwnerUid))
+    );
+
+    if (isVerifiedOwnerOrAdmin || sessionPinVerifiedRef.current) {
+      setSyncError(
+        'Enregistrement refusé par Firebase : publiez la dernière version du fichier firestore.rules dans Firebase Console (Firestore Database → Règles → Publier).'
+      );
+      setSidebarToast('Règles Firebase à republier (firestore.rules).');
+      return;
+    }
+
     setCanEditCloud(false);
     setSidebarToast('Code PIN requis ou expiré pour modifier en ligne.');
     setPinModalOpen(true);
@@ -358,6 +375,7 @@ export default function App() {
 
   const handleSignOut = async () => {
     autoAnonAttemptedRef.current = false;
+    sessionPinVerifiedRef.current = false;
     await signOut(auth);
     setSidebarToast('Déconnecté.');
   };
@@ -367,6 +385,8 @@ export default function App() {
       throw new Error('Connexion au serveur en cours, réessayez dans un instant.');
     }
     await unlockTeamEditorWithPin(siteId, siteOwnerUid, user, pin, displayName);
+    sessionPinVerifiedRef.current = true;
+    setSyncError(null);
     setCanEditCloud(true);
     setEditorMemberName(displayName);
     setSidebarToast('Mode Édition déverrouillé pour cette session.');
@@ -375,6 +395,7 @@ export default function App() {
   const handleLockEditor = async () => {
     if (!user || !siteId) return;
     await lockTeamEditorSession(siteId, user);
+    sessionPinVerifiedRef.current = false;
     setCanEditCloud(false);
     setEditorMemberName(null);
     setSidebarToast('Mode Édition verrouillé (lecture seule).');
@@ -807,6 +828,7 @@ export default function App() {
 
   const handleToggleEpiSitePerson = (zoneId: string, personId: string) => {
     if (!requireEditAccess()) return;
+    setSyncError(null);
     const prevSnapshot = dataRef.current;
     const targetZone = prevSnapshot.zones.find((z) => z.id === zoneId);
     if (!targetZone) return;
@@ -845,6 +867,7 @@ export default function App() {
 
   const handleClearZoneEpiSite = (zoneId: string) => {
     if (!requireEditAccess()) return;
+    setSyncError(null);
     const prevSnapshot = dataRef.current;
     const targetZone = prevSnapshot.zones.find((z) => z.id === zoneId);
     if (!targetZone || (targetZone.epiSitePersonIds || []).length === 0) return;
@@ -1293,6 +1316,22 @@ export default function App() {
 
         {/* Contenu principal */}
         <main className="flex-1 min-w-0 flex flex-col">
+          {syncError && (
+            <div className="no-print bg-red-50 border-b border-red-200 px-5 py-2.5 flex items-center justify-between gap-3 text-xs text-red-800">
+              <div className="flex items-center gap-2 min-w-0">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>{syncError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSyncError(null)}
+                className="p-1 text-red-600 hover:bg-red-100 rounded cursor-pointer shrink-0"
+                aria-label="Fermer l'alerte"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
           {activeTab === 'poster' && (
             <div className="flex-1 flex flex-col">
               {/* Barre d'outils de l'aperçu (masquée à l'impression) */}
@@ -1613,6 +1652,7 @@ export default function App() {
         zone={activeZone}
         people={data.people}
         zonesById={zonesById}
+        errorMsg={syncError}
         onTogglePerson={handleToggleEpiSitePerson}
         onClearAll={handleClearZoneEpiSite}
         onClose={() => setEpiSiteModalOpen(false)}

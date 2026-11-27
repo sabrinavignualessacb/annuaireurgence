@@ -9,6 +9,7 @@ interface EpiSiteModalProps {
   zone: Zone | undefined;
   people: Person[];
   zonesById: Map<string, Zone>;
+  errorMsg?: string | null;
   onTogglePerson: (zoneId: string, personId: string) => void;
   onClearAll: (zoneId: string) => void;
   onClose: () => void;
@@ -19,6 +20,7 @@ export const EpiSiteModal: React.FC<EpiSiteModalProps> = ({
   zone,
   people,
   zonesById,
+  errorMsg,
   onTogglePerson,
   onClearAll,
   onClose,
@@ -111,6 +113,13 @@ export const EpiSiteModal: React.FC<EpiSiteModalProps> = ({
         </div>
 
         <div className="p-5 space-y-3.5 overflow-y-auto flex-1">
+          {errorMsg && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-xs flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono-num text-slate-700">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <span>
